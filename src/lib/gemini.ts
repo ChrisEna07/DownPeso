@@ -3,8 +3,50 @@ import { db, getTodayDateString } from './db';
 import { deobfuscateKey } from './crypto';
 import { UserProfile, Recipe } from '@/types';
 
-// Modelo recomendado para tareas conversacionales rápidas y económicas
-export const GEMINI_MODEL = 'gemini-2.5-flash';
+// Modelos recomendados con fallback automático (iniciando por gemini-3.6-flash como solicita Google AI)
+export const CANDIDATE_MODELS = [
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-3.5-flash-lite'
+];
+
+/**
+ * Ejecuta generateContent probando los modelos candidatos en caso de 404 o deprecación
+ */
+async function generateContentWithFallback(
+  client: GoogleGenAI,
+  params: {
+    contents: any;
+    systemInstruction?: string;
+    temperature?: number;
+    responseMimeType?: string;
+  }
+) {
+  let lastError: any = null;
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const config: any = {};
+      if (params.systemInstruction) config.systemInstruction = params.systemInstruction;
+      if (params.temperature !== undefined) config.temperature = params.temperature;
+      if (params.responseMimeType) config.responseMimeType = params.responseMimeType;
+
+      return await client.models.generateContent({
+        model,
+        contents: params.contents,
+        config
+      });
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = String(err?.message || '');
+      if (errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('no longer available')) {
+        console.warn(`Modelo ${model} no disponible, probando siguiente candidato...`);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
 
 /**
  * Obtiene una instancia del cliente de GoogleGenAI con la clave del usuario
@@ -122,13 +164,10 @@ export async function sendChatMessage(userMessage: string): Promise<string> {
   });
 
   try {
-    const response = await client.models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await generateContentWithFallback(client, {
       contents: contents as any,
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.7,
-      }
+      systemInstruction: systemInstruction,
+      temperature: 0.7
     });
 
     const replyText = response.text || 'No pude generar una respuesta en este momento. Intenta de nuevo.';
@@ -146,15 +185,22 @@ export async function sendChatMessage(userMessage: string): Promise<string> {
     return replyText;
   } catch (error: any) {
     console.error('Error en llamada a Gemini API:', error);
-    // Verificar si es error de autenticación o cuota
-    const errorMsg = error?.message || '';
+    let errorMsg = String(error?.message || '');
+    try {
+      // Si el mensaje es un JSON de Google AI, extraer el texto limpio
+      const parsed = JSON.parse(errorMsg);
+      if (parsed?.error?.message) {
+        errorMsg = parsed.error.message;
+      }
+    } catch (_) {}
+
     if (errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403')) {
-      throw new Error('La Gemini API Key ingresada no es válida o ha sido rechazada por Google. Revisa tu clave en Configuración.');
+      throw new Error('La Gemini API Key ingresada no es válida o no tiene permisos. Revisa tu clave en Configuración.');
     }
     if (errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('429')) {
       throw new Error('Límite de cuota alcanzado en Gemini API. Por favor espera un minuto antes de reintentar.');
     }
-    throw new Error(`Error al conectar con la IA de DownPeso: ${error?.message || 'Verifica tu conexión'}`);
+    throw new Error(`Error de conexión con la IA: ${errorMsg}`);
   }
 }
 
@@ -212,12 +258,9 @@ Responde ÚNICAMENTE en formato JSON plano:
 }`;
 
   try {
-    const response = await client.models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await generateContentWithFallback(client, {
       contents: prompt,
-      config: {
-        responseMimeType: 'application/json'
-      }
+      responseMimeType: 'application/json'
     });
 
     const text = response.text;
@@ -282,12 +325,9 @@ Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
   "tags": ["Económica", "Con lo que hay en el refri", "Saludable"]
 }`;
 
-  const response = await client.models.generateContent({
-    model: GEMINI_MODEL,
+  const response = await generateContentWithFallback(client, {
     contents: prompt,
-    config: {
-      responseMimeType: 'application/json'
-    }
+    responseMimeType: 'application/json'
   });
 
   const text = response.text;
