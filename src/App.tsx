@@ -12,6 +12,7 @@ import { ExerciseGuide } from '@/components/exercises/ExerciseGuide';
 import { RemediesGuide } from '@/components/natural-remedies/RemediesGuide';
 import { StreakTracker } from '@/components/streaks/StreakTracker';
 import { BackupManager } from '@/components/backup/BackupManager';
+import { FloatingCoach } from '@/components/chat/FloatingCoach';
 import { Loader2 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -58,6 +59,9 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     refreshAppData();
+    const handleDataUpdated = () => refreshAppData();
+    window.addEventListener('downpeso:data-updated', handleDataUpdated);
+    return () => window.removeEventListener('downpeso:data-updated', handleDataUpdated);
   }, [refreshAppData]);
 
   if (isLoadingApp) {
@@ -147,6 +151,16 @@ export const App: React.FC = () => {
           )}
         </div>
       </main>
+
+      {/* Botón Flotante del Coach accesible en cualquier pantalla */}
+      {profile && (
+        <FloatingCoach
+          profile={profile}
+          currentTab={activeTab}
+          onOpenFullChat={() => setActiveTab('chat')}
+          onDataUpdated={refreshAppData}
+        />
+      )}
 
       {/* Modal de Onboarding / Perfil Antropométrico */}
       <OnboardingModal

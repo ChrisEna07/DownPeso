@@ -19,12 +19,27 @@ export interface UserProfile {
   updatedAt: string;
 }
 
+export type CoachActionType =
+  | 'add_water'
+  | 'add_food'
+  | 'log_exercise'
+  | 'add_veggies'
+  | 'record_weight'
+  | 'save_recipe';
+
+export interface CoachAction {
+  type: CoachActionType;
+  label: string;
+  data: any;
+}
+
 export interface ChatMessage {
   id?: number;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
   summarized?: boolean;
+  executedActions?: CoachAction[];
 }
 
 export interface AIMemorySummary {

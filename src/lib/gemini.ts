@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
-import { db, getTodayDateString } from './db';
+import { db, getTodayDateString, getOrCreateTodayStreak } from './db';
 import { deobfuscateKey } from './crypto';
-import { UserProfile, Recipe } from '@/types';
+import { UserProfile, Recipe, CoachAction, FoodLog } from '@/types';
+import { calculateBMI } from './calculations';
 
 // Modelos recomendados con fallback automático (iniciando por gemini-3.6-flash como solicita Google AI)
 export const CANDIDATE_MODELS = [
@@ -118,10 +119,154 @@ ${foodSummary}
 DIRECTRICES DE TUS RESPUESTAS:
 1. Siempre reconoce sus avances y sé positivo pero realista. No recomiendes dietas milagro ni restricciones extremas.
 2. Promueve comida casera, accesible y económica (ingredientes tradicionales como huevo, avena, verduras de mercado, legumbres, atún).
-3. Si el usuario menciona lo que acaba de comer (ej. "Hoy comí una manzana y dos huevos"), felicítalo o dale un tip amable, e incluye al final de tu respuesta una sugerencia clara para registrarlo si lo desea con una línea formateada exactamente así:
-[LOG_SUGGESTION: {"mealType": "almuerzo", "description": "Sopa de verduras con huevo", "estimatedCalories": 220, "healthyRating": "excelente"}]
+3. SUPERPODER DE REGISTRO AUTOMÁTICO (ASISTENTE INTEGRAL):
+Tienes el poder de registrar y modificar directamente los hábitos y datos del usuario en la base de datos de la app.
+Cuando el usuario te cuente que tomó agua, comió algo, hizo ejercicio, consumió vegetales o se pesó, respóndele de forma natural y cálida confirmándole que ya lo anotaste por él en su diario de hoy, e INCLUYE al final de tu respuesta la acción técnica en esta sintaxis EXACTA:
+- Si tomó agua (ej. "tomé 3 vasos de agua", "me tomé un vaso"):
+  <<<ACTION:{"type":"add_water","glasses":3}>>>
+- Si comió algo (ej. "comí sopa de verduras con huevo", "cené carne molida"):
+  <<<ACTION:{"type":"add_food","mealType":"cena","description":"Carne molida con 2 huevos","estimatedCalories":360,"healthyRating":"excelente"}>>>
+- Si hizo ejercicio o caminó (ej. "hice 20 min de caminata", "hice la rutina"):
+  <<<ACTION:{"type":"log_exercise","minutes":20}>>>
+- Si consumió vegetales (ej. "comí ensalada", "comí brócoli"):
+  <<<ACTION:{"type":"add_veggies","portions":1}>>>
+- Si registró un nuevo peso (ej. "hoy pesé 81.5 kg"):
+  <<<ACTION:{"type":"record_weight","weight":81.5}>>>
+
+REGLA DE ORO DE INTERFAZ:
+NUNCA escribas JSON, ni corchetes crudos, ni [LOG_SUGGESTION] en tu texto conversacional visible. Toda acción debe ir dentro de <<<ACTION:{...}>>>. El sistema la procesará y la ocultará automáticamente del chat.
 4. Si pide recetas o ejercicios, adapta la recomendación a su nivel y condición articular (siempre prioriza bajo impacto si hay sobrepeso).
 5. Habla en español con tono motivador, profesional y cercano.`;
+}
+
+/**
+ * Analiza y ejecuta de manera autónoma las acciones indicadas por el Consejero IA en Dexie.js
+ * y limpia el texto para evitar fugas de código en la interfaz.
+ */
+export async function executeAndCleanCoachActions(
+  rawText: string,
+  profile: UserProfile
+): Promise<{ cleanText: string; executedActions: CoachAction[] }> {
+  const executedActions: CoachAction[] = [];
+  const today = getTodayDateString();
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const actionRegexes = [
+    /<<<ACTION:\s*({.*?})>>>/gis,
+    /<<<ACTION>>>\s*({.*?})\s*<<<\/ACTION>>>/gis,
+    /\[LOG_SUGGESTION:\s*({.*?})\]/gis,
+    /\[ACTION:\s*({.*?})\]/gis
+  ];
+
+  for (const regex of actionRegexes) {
+    let match;
+    while ((match = regex.exec(rawText)) !== null) {
+      try {
+        const payload = JSON.parse(match[1]);
+        const type = payload.type || (payload.mealType ? 'add_food' : null);
+
+        if (type === 'add_water' || (payload.glasses !== undefined && !payload.mealType)) {
+          const glasses = Number(payload.glasses) || 1;
+          const streak = await getOrCreateTodayStreak();
+          const newTotal = Math.max(0, (streak.waterGlasses || 0) + glasses);
+          await db.dailyStreaks.update(streak.id!, {
+            waterGlasses: newTotal
+          });
+          executedActions.push({
+            type: 'add_water',
+            label: `+${glasses} ${glasses === 1 ? 'vaso' : 'vasos'} de agua anotados (+${glasses * 250} ml)`,
+            data: { glasses, totalGlasses: newTotal }
+          });
+        } else if (type === 'add_food' || payload.mealType || payload.description) {
+          const mealType = payload.mealType || 'almuerzo';
+          const description = payload.description || 'Comida registrada con el asistente';
+          const estimatedCalories = Number(payload.estimatedCalories) || 250;
+          const healthyRating = payload.healthyRating || 'bueno';
+
+          const newFood: FoodLog = {
+            date: today,
+            time: timeStr,
+            mealType,
+            description,
+            estimatedCalories,
+            healthyRating,
+            aiFeedback: 'Anotado automáticamente por tu Consejero IA'
+          };
+          await db.foodLogs.add(newFood);
+          executedActions.push({
+            type: 'add_food',
+            label: `Comida anotada (${mealType}): ${description} (~${estimatedCalories} kcal)`,
+            data: newFood
+          });
+        } else if (type === 'log_exercise') {
+          const minutes = Number(payload.minutes) || 20;
+          const streak = await getOrCreateTodayStreak();
+          await db.dailyStreaks.update(streak.id!, {
+            exerciseCompleted: true,
+            exerciseMinutes: (streak.exerciseMinutes || 0) + minutes
+          });
+          executedActions.push({
+            type: 'log_exercise',
+            label: `Ejercicio registrado: ${minutes} min de actividad completada`,
+            data: { minutes }
+          });
+        } else if (type === 'add_veggies') {
+          const portions = Number(payload.portions) || 1;
+          const streak = await getOrCreateTodayStreak();
+          const newPortions = (streak.vegetablesPortions || 0) + portions;
+          await db.dailyStreaks.update(streak.id!, {
+            vegetablesPortions: newPortions
+          });
+          executedActions.push({
+            type: 'add_veggies',
+            label: `+${portions} ${portions === 1 ? 'porción' : 'porciones'} de vegetales anotada`,
+            data: { portions }
+          });
+        } else if (type === 'record_weight') {
+          const newWeight = Number(payload.weight);
+          if (!isNaN(newWeight) && newWeight >= 30 && newWeight <= 300) {
+            const newBmi = calculateBMI(newWeight, profile.height);
+            await db.userProfile.update(profile.id!, {
+              currentWeight: newWeight,
+              bmi: newBmi,
+              updatedAt: now.toISOString()
+            });
+            await db.weightRecords.add({
+              date: today,
+              weight: newWeight,
+              note: 'Anotado por tu Consejero IA'
+            });
+            executedActions.push({
+              type: 'record_weight',
+              label: `Nuevo peso anotado: ${newWeight} kg (IMC: ${newBmi})`,
+              data: { weight: newWeight, bmi: newBmi }
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Error al procesar acción del coach:', err);
+      }
+    }
+  }
+
+  // Limpiar completamente el texto visible de cualquier código o etiqueta
+  let cleanText = rawText;
+  for (const regex of actionRegexes) {
+    cleanText = cleanText.replace(regex, '');
+  }
+  cleanText = cleanText
+    .replace(/<<<ACTION.*?>>>/gis, '')
+    .replace(/\[LOG_SUGGESTION.*?\]/gis, '')
+    .replace(/\[ACTION.*?\]/gis, '')
+    .trim();
+
+  // Disparar evento global para que Dashboard y demás vistas se refresquen de inmediato
+  if (executedActions.length > 0 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('downpeso:data-updated'));
+  }
+
+  return { cleanText, executedActions };
 }
 
 /**
@@ -170,24 +315,27 @@ export async function sendChatMessage(userMessage: string): Promise<string> {
       temperature: 0.7
     });
 
-    const replyText = response.text || 'No pude generar una respuesta en este momento. Intenta de nuevo.';
+    const rawReply = response.text || 'No pude generar una respuesta en este momento. Intenta de nuevo.';
 
-    // Guardar respuesta del asistente en BD
+    // Procesar y ejecutar cualquier acción automática (agua, comidas, ejercicio, peso)
+    const { cleanText, executedActions } = await executeAndCleanCoachActions(rawReply, profile);
+
+    // Guardar respuesta limpia del asistente en BD con sus acciones ejecutadas
     await db.chatHistory.add({
       role: 'assistant',
-      content: replyText,
-      timestamp: new Date().toISOString()
+      content: cleanText,
+      timestamp: new Date().toISOString(),
+      executedActions: executedActions.length > 0 ? executedActions : undefined
     });
 
     // Disparar rutina de resumen en segundo plano si hay muchos mensajes acumulados
     triggerMemorySummarizationIfNeeded().catch(err => console.warn('Memory summarization skipped:', err));
 
-    return replyText;
+    return cleanText;
   } catch (error: any) {
     console.error('Error en llamada a Gemini API:', error);
     let errorMsg = String(error?.message || '');
     try {
-      // Si el mensaje es un JSON de Google AI, extraer el texto limpio
       const parsed = JSON.parse(errorMsg);
       if (parsed?.error?.message) {
         errorMsg = parsed.error.message;

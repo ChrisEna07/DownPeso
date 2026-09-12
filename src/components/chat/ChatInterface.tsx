@@ -52,6 +52,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
 
   useEffect(() => {
     loadChat();
+    const handleUpdate = () => loadChat();
+    window.addEventListener('downpeso:data-updated', handleUpdate);
+    return () => window.removeEventListener('downpeso:data-updated', handleUpdate);
   }, []);
 
   useEffect(() => {
@@ -112,10 +115,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
     }
   };
 
-  // Helper para renderizar contenido con tarjetas de sugerencias de comida detectadas
-  const renderMessageContent = (content: string, msgIndex: number) => {
-    const logMatch = content.match(/\[LOG_SUGGESTION:\s*({.*?})\]/s);
-    const cleanedText = content.replace(/\[LOG_SUGGESTION:\s*({.*?})\]/s, '').trim();
+  // Helper para renderizar contenido limpio y tarjetas de acciones ejecutadas por el coach
+  const renderMessageContent = (msg: ChatMessage, msgIndex: number) => {
+    // Limpieza radical de cualquier residuo técnico para que NUNCA se filtre código al usuario
+    const cleanedText = msg.content
+      .replace(/<<<ACTION:\s*({.*?})>>>/gis, '')
+      .replace(/<<<ACTION>>>\s*({.*?})\s*<<<\/ACTION>>>/gis, '')
+      .replace(/\[LOG_SUGGESTION:\s*({.*?})\]/gis, '')
+      .replace(/\[ACTION:\s*({.*?})\]/gis, '')
+      .trim();
+
+    const logMatch = msg.content.match(/\[LOG_SUGGESTION:\s*({.*?})\]/s);
 
     return (
       <div className="space-y-3">
@@ -123,18 +133,26 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
           {cleanedText}
         </div>
 
-        {logMatch && (
-          <div className="mt-2 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300/80 dark:border-emerald-800 rounded-2xl">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                <Sparkles className="w-4 h-4 text-emerald-600" />
-                Detección de Alimento
+        {/* Acciones ejecutadas automáticamente por el Coach */}
+        {msg.executedActions && msg.executedActions.length > 0 && (
+          <div className="mt-2.5 space-y-1.5">
+            {msg.executedActions.map((action, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 p-2.5 rounded-2xl bg-emerald-100/90 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs font-bold shadow-sm animate-in fade-in"
+              >
+                <div className="p-1 bg-emerald-600 text-white rounded-lg shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                </div>
+                <span>{action.label}</span>
               </div>
-              <span className="text-[10px] uppercase font-extrabold tracking-wider bg-emerald-200/70 dark:bg-emerald-900 px-2 py-0.5 rounded-full text-emerald-800 dark:text-emerald-200">
-                Listo para registrar
-              </span>
-            </div>
+            ))}
+          </div>
+        )}
 
+        {/* Retrocompatibilidad para mensajes antiguos con formato previo */}
+        {!msg.executedActions?.length && logMatch && (
+          <div className="mt-2 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300/80 dark:border-emerald-800 rounded-2xl">
             {loggedSuggestions[msgIndex] ? (
               <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 className="w-4 h-4" />
@@ -146,7 +164,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
                 className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors shadow-sm"
               >
                 <PlusCircle className="w-4 h-4" />
-                Confirmar y Registrar Comida de Hoy
+                Confirmar y Registrar Comida
               </button>
             )}
           </div>
@@ -259,7 +277,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
                   {isUser ? (
                     <p className="whitespace-pre-wrap leading-relaxed text-sm">{msg.content}</p>
                   ) : (
-                    renderMessageContent(msg.content, idx)
+                    renderMessageContent(msg, idx)
                   )}
 
                   <div
