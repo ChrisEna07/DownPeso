@@ -40,6 +40,7 @@ export interface ChatMessage {
   timestamp: string;
   summarized?: boolean;
   executedActions?: CoachAction[];
+  isConfirmed?: boolean;
 }
 
 export interface AIMemorySummary {
@@ -141,4 +142,28 @@ export interface AppBackupData {
     recipes: Recipe[];
     weightRecords?: WeightRecord[];
   };
+}
+
+export type ThemeMode = 'light' | 'dark' | 'system';
+export type FontSize = 'sm' | 'base' | 'lg';
+export type AppLanguage = 'es' | 'en' | 'fr' | 'ru';
+
+export interface AppSettings {
+  theme: ThemeMode;
+  fontSize: FontSize;
+  language: AppLanguage;
+  notificationsEnabled: boolean;
+  notificationIntervalMinutes: number;
+}
+
+export type FeedbackType = 'success' | 'error' | 'announcement';
+
+export interface FeedbackItem {
+  id: string;
+  type: FeedbackType;
+  title: string;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  durationMs?: number;
 }

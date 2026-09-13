@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { db, getTodayDateString } from '@/lib/db';
 import { sendChatMessage, triggerMemorySummarizationIfNeeded } from '@/lib/gemini';
+import { showFeedback } from '@/lib/feedback';
+import { t } from '@/lib/i18n';
 import confetti from 'canvas-confetti';
 
 interface ChatInterfaceProps {
@@ -101,17 +103,56 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
         description: parsed.description || 'Comida registrada con asistente',
         estimatedCalories: parsed.estimatedCalories || 200,
         healthyRating: parsed.healthyRating || 'bueno',
-        aiFeedback: 'Registrado desde Consejero IA'
+        aiFeedback: 'Registrado desde Otto Coach'
       };
 
       await db.foodLogs.add(newLog);
+
+      // Persistir permanentemente que este mensaje fue confirmado en IndexedDB
+      const targetMsg = messages[msgIndex];
+      if (targetMsg?.id) {
+        await db.chatHistory.update(targetMsg.id, { isConfirmed: true });
+      }
+
+      // Añadir mensaje conversacional de Otto confirmando el registro
+      const confirmationText = `¡Listo, ${profile.name}! He registrado ${newLog.description} (~${newLog.estimatedCalories} kcal) en tu diario de hoy. Excelente decisión, ¡cada paso cuenta! 💪`;
+      await db.chatHistory.add({
+        role: 'assistant',
+        content: confirmationText,
+        timestamp: new Date().toISOString(),
+        executedActions: [
+          {
+            type: 'add_food',
+            label: `Comida confirmada: ${newLog.description} (~${newLog.estimatedCalories} kcal)`,
+            data: newLog
+          }
+        ]
+      });
+
+      // Feedback visual reactivo tipo éxito
+      showFeedback({
+        type: 'success',
+        title: '¡Comida Registrada!',
+        message: `${newLog.description} (~${newLog.estimatedCalories} kcal) guardada en tu diario de hoy.`
+      });
+
       setLoggedSuggestions(prev => ({ ...prev, [msgIndex]: true }));
       try {
-        confetti({ particleCount: 40, spread: 50, origin: { y: 0.8 } });
+        confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
       } catch (_) {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('downpeso:data-updated'));
+      }
       onFoodLogged?.();
+      await loadChat();
     } catch (err) {
       console.error('Error parseando sugerencia de comida:', err);
+      showFeedback({
+        type: 'error',
+        title: 'Error al Registrar',
+        message: 'No se pudo guardar la comida. Intenta de nuevo.'
+      });
     }
   };
 
@@ -156,7 +197,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
         {/* Retrocompatibilidad para mensajes antiguos con formato previo */}
         {!msg.executedActions?.length && logMatch && (
           <div className="mt-2 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300/80 dark:border-emerald-800 rounded-2xl">
-            {loggedSuggestions[msgIndex] ? (
+            {msg.isConfirmed || loggedSuggestions[msgIndex] ? (
               <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 className="w-4 h-4" />
                 ¡Comida guardada en tu registro diario!
@@ -164,7 +205,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
             ) : (
               <button
                 onClick={() => handleSaveFoodSuggestion(msgIndex, logMatch[1])}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors shadow-sm"
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors shadow-sm active:scale-95"
               >
                 <PlusCircle className="w-4 h-4" />
                 Confirmar y Registrar Comida
@@ -309,7 +350,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
             </div>
             <div className="p-3.5 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-bl-none flex items-center gap-2 border border-slate-200/60 dark:border-slate-700/60">
               <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-              <span>Otto está pensando...</span>
+              <span>{t('otto_thinking')}</span>
             </div>
           </div>
         )}
@@ -328,7 +369,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
       <div className="p-3 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2">
         {messages.length > 0 && (
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-            <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">Atajos:</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">{t('quick_shortcuts')}</span>
             {QUICK_PROMPTS.slice(0, 3).map((qp, i) => (
               <button
                 key={i}
@@ -350,7 +391,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
         >
           <input
             type="text"
-            placeholder="Pregúntale a Otto, o cuéntale qué tomaste, comiste o hiciste hoy..."
+            placeholder={t('otto_input_placeholder')}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             disabled={isLoading}

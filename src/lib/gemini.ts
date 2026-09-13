@@ -3,6 +3,9 @@ import { db, getTodayDateString, getOrCreateTodayStreak } from './db';
 import { deobfuscateKey } from './crypto';
 import { UserProfile, Recipe, CoachAction, FoodLog } from '@/types';
 import { calculateBMI } from './calculations';
+import { getAppSettings } from './settings';
+import { getLanguagePromptInstruction } from './i18n';
+import { showFeedback } from './feedback';
 
 // Modelos recomendados con fallback automático (iniciando por gemini-3.6-flash como solicita Google AI)
 export const CANDIDATE_MODELS = [
@@ -131,9 +134,14 @@ async function buildSystemInstruction(profile: UserProfile): Promise<string> {
     ? `Agua tomada hoy: ${todayStreak.waterGlasses} vasos de 250ml (${todayStreak.waterGlasses * 250}ml / Meta: ${profile.dailyWaterGoalMl}ml). Ejercicio completado: ${todayStreak.exerciseCompleted ? 'SÍ' : 'Aún no'}. Porciones vegetales: ${todayStreak.vegetablesPortions}.`
     : 'Sin registros de racha hoy todavía.';
 
+  const currentLang = getAppSettings().language || 'es';
+  const languageInstruction = getLanguagePromptInstruction(currentLang);
+
   return `Eres "Otto", el coach personal e hiper-inteligente de nutrición casera, hábitos y reducción de peso de DownPeso By ChrizDev.
 Tu misión es guiar al usuario con empatía, base científica, calidez y practicidad.
 Tu mayor valor es que APRENDES continuamente de todo lo que ${profile.name} hace, anota y conversa contigo. Recuerdas sus notas, dificultades, alimentos favoritos y logros.
+
+${languageInstruction}
 
 DATOS ANTROPOMÉTRICOS DEL USUARIO:
 - Nombre: ${profile.name} (Salúdalo con cercanía como Otto)
@@ -182,7 +190,7 @@ Cuando el usuario te cuente que tomó agua, comió algo, hizo ejercicio, consumi
 REGLA DE ORO DE INTERFAZ:
 NUNCA escribas JSON, ni corchetes crudos, ni [LOG_SUGGESTION] en tu texto conversacional visible. Toda acción debe ir dentro de <<<ACTION:{...}>>>. El sistema la procesará y la ocultará automáticamente del chat.
 5. Si pide recetas o ejercicios, adapta la recomendación a su nivel y condición articular (siempre prioriza bajo impacto si hay sobrepeso).
-6. Habla en español con tono motivador, profesional y cercano.`;
+6. ${languageInstruction} Comunícate con tono motivador, profesional y cercano.`;
 }
 
 /**
@@ -373,6 +381,17 @@ export async function sendChatMessage(userMessage: string): Promise<string> {
       timestamp: new Date().toISOString(),
       executedActions: executedActions.length > 0 ? executedActions : undefined
     });
+
+    // Feedback visual reactivo para cada acción ejecutada automáticamente
+    if (executedActions.length > 0) {
+      executedActions.forEach((act) => {
+        showFeedback({
+          type: 'success',
+          title: '¡Acción Anotada por Otto!',
+          message: act.label
+        });
+      });
+    }
 
     // Disparar rutina de resumen en segundo plano si hay muchos mensajes acumulados
     triggerMemorySummarizationIfNeeded().catch(err => console.warn('Memory summarization skipped:', err));

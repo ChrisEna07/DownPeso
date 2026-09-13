@@ -15,6 +15,9 @@ import { BackupManager } from '@/components/backup/BackupManager';
 import { FloatingCoach } from '@/components/chat/FloatingCoach';
 import { NotificationBanner } from '@/components/notifications/NotificationBanner';
 import { initSmartNotifications } from '@/lib/notifications';
+import { initSettings } from '@/lib/settings';
+import { SettingsModal } from '@/components/settings/SettingsModal';
+import { FeedbackToastContainer } from '@/components/feedback/FeedbackToast';
 import { Loader2 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -25,6 +28,8 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isLoadingApp, setIsLoadingApp] = useState<boolean>(true);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [, setLangVersion] = useState<number>(0);
 
   // Inicialización y carga de datos de IndexedDB
   const refreshAppData = useCallback(async () => {
@@ -60,11 +65,18 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    initSettings();
     refreshAppData();
     initSmartNotifications();
     const handleDataUpdated = () => refreshAppData();
+    const handleSettingsUpdated = () => setLangVersion((v) => v + 1);
+
     window.addEventListener('downpeso:data-updated', handleDataUpdated);
-    return () => window.removeEventListener('downpeso:data-updated', handleDataUpdated);
+    window.addEventListener('downpeso:settings-updated', handleSettingsUpdated);
+    return () => {
+      window.removeEventListener('downpeso:data-updated', handleDataUpdated);
+      window.removeEventListener('downpeso:settings-updated', handleSettingsUpdated);
+    };
   }, [refreshAppData]);
 
   if (isLoadingApp) {
@@ -85,6 +97,9 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Contenedor de Toasts de Feedback Reactivo (Éxito, Error, Anuncio) */}
+      <FeedbackToastContainer />
+
       {/* Banner de Notificaciones Inteligentes de Hidratación */}
       <NotificationBanner />
 
@@ -96,6 +111,7 @@ export const App: React.FC = () => {
         profile={profile}
         onOpenProfile={() => setShowProfileModal(true)}
         onOpenBackup={() => setActiveTab('backup')}
+        onOpenSettings={() => setShowSettingsModal(true)}
         activeStreak={activeStreakCount}
       />
 
@@ -176,6 +192,16 @@ export const App: React.FC = () => {
         }}
         existingProfile={profile}
         onProfileSaved={refreshAppData}
+      />
+
+      {/* Modal de Configuración (Notificaciones, Tema, Letra, Idioma) */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        onOpenProfile={() => {
+          setShowSettingsModal(false);
+          setShowProfileModal(true);
+        }}
       />
     </div>
   );

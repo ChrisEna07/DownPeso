@@ -1,11 +1,12 @@
 import React from 'react';
 import { UserProfile } from '@/types';
-import { Flame, UserCog, Database, Sparkles } from 'lucide-react';
+import { Flame, UserCog, Database, Sparkles, Settings } from 'lucide-react';
 
 interface NavbarProps {
   profile: UserProfile | null;
   onOpenProfile: () => void;
   onOpenBackup: () => void;
+  onOpenSettings: () => void;
   activeStreak: number;
 }
 
@@ -13,6 +14,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   profile,
   onOpenProfile,
   onOpenBackup,
+  onOpenSettings,
   activeStreak
 }) => {
   return (
@@ -49,6 +51,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="text-xs sm:text-sm font-extrabold">{activeStreak}</span>
             <span className="text-[11px] hidden sm:inline font-semibold">días</span>
           </div>
+
+          {/* Botón rápido de Configuración */}
+          <button
+            onClick={onOpenSettings}
+            className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-slate-800 transition-colors"
+            title="Configuración (Notificaciones, Tema, Letra, Idioma)"
+            aria-label="Abrir configuración"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
 
           {/* Botón rápido de Respaldo */}
           <button

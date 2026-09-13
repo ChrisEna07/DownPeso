@@ -8,6 +8,7 @@ import {
   CheckCheck,
   Database
 } from 'lucide-react';
+import { t } from '@/lib/i18n';
 
 export type ActiveTab = 'dashboard' | 'chat' | 'recipes' | 'exercises' | 'remedies' | 'streaks' | 'backup';
 
@@ -18,19 +19,19 @@ interface TabNavigationProps {
 
 interface TabItem {
   id: ActiveTab;
-  label: string;
+  labelKey: string;
   icon: React.ElementType;
-  shortLabel: string;
+  shortLabelKey: string;
 }
 
 const TABS: TabItem[] = [
-  { id: 'dashboard', label: 'Inicio', shortLabel: 'Inicio', icon: LayoutDashboard },
-  { id: 'chat', label: 'Otto Coach IA', shortLabel: 'Otto', icon: MessageSquareHeart },
-  { id: 'recipes', label: 'Recetario Casero', shortLabel: 'Recetas', icon: UtensilsCrossed },
-  { id: 'exercises', label: 'Ejercicios', shortLabel: 'Rutinas', icon: Dumbbell },
-  { id: 'remedies', label: 'Botiquín Natural', shortLabel: 'Infusiones', icon: Leaf },
-  { id: 'streaks', label: 'Rachas & Hábitos', shortLabel: 'Hábitos', icon: CheckCheck },
-  { id: 'backup', label: 'Centro de Datos', shortLabel: 'Respaldo', icon: Database },
+  { id: 'dashboard', labelKey: 'nav_home', shortLabelKey: 'nav_home', icon: LayoutDashboard },
+  { id: 'chat', labelKey: 'nav_coach', shortLabelKey: 'nav_coach_short', icon: MessageSquareHeart },
+  { id: 'recipes', labelKey: 'nav_recipes', shortLabelKey: 'nav_recipes_short', icon: UtensilsCrossed },
+  { id: 'exercises', labelKey: 'nav_exercises', shortLabelKey: 'nav_exercises_short', icon: Dumbbell },
+  { id: 'remedies', labelKey: 'nav_remedies', shortLabelKey: 'nav_remedies_short', icon: Leaf },
+  { id: 'streaks', labelKey: 'nav_streaks', shortLabelKey: 'nav_streaks_short', icon: CheckCheck },
+  { id: 'backup', labelKey: 'nav_backup', shortLabelKey: 'nav_backup_short', icon: Database },
 ];
 
 export const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onSelectTab }) => {
@@ -53,7 +54,7 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onSelec
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                {tab.label}
+                {t(tab.labelKey)}
               </button>
             );
           })}
@@ -80,7 +81,7 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onSelec
                   <Icon className="w-5 h-5" />
                 </div>
                 <span className="text-[9px] mt-0.5 truncate max-w-[48px] text-center">
-                  {tab.shortLabel}
+                  {t(tab.shortLabelKey)}
                 </span>
               </button>
             );
