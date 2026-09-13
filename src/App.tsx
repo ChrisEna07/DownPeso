@@ -13,6 +13,8 @@ import { RemediesGuide } from '@/components/natural-remedies/RemediesGuide';
 import { StreakTracker } from '@/components/streaks/StreakTracker';
 import { BackupManager } from '@/components/backup/BackupManager';
 import { FloatingCoach } from '@/components/chat/FloatingCoach';
+import { NotificationBanner } from '@/components/notifications/NotificationBanner';
+import { initSmartNotifications } from '@/lib/notifications';
 import { Loader2 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -59,6 +61,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     refreshAppData();
+    initSmartNotifications();
     const handleDataUpdated = () => refreshAppData();
     window.addEventListener('downpeso:data-updated', handleDataUpdated);
     return () => window.removeEventListener('downpeso:data-updated', handleDataUpdated);
@@ -82,6 +85,9 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Banner de Notificaciones Inteligentes de Hidratación */}
+      <NotificationBanner />
+
       {/* Banner de Instalación PWA */}
       <InstallPrompt />
 

@@ -11,10 +11,19 @@ import {
   Trophy,
   Plus,
   Minus,
-  Edit3
+  Edit3,
+  Bell,
+  Clock
 } from 'lucide-react';
-import { db, getTodayDateString, calculateActiveStreakDays } from '@/lib/db';
+import { db, getTodayDateString, calculateActiveStreakDays, getOrCreateTodayStreak } from '@/lib/db';
 import { mlToGlasses } from '@/lib/calculations';
+import {
+  triggerSmartHydrationReminder,
+  requestNotificationPermission,
+  getNotificationSettings,
+  saveNotificationSettings,
+  NotificationSettings
+} from '@/lib/notifications';
 import confetti from 'canvas-confetti';
 
 interface StreakTrackerProps {
@@ -35,6 +44,11 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
   const [pastStreaks, setPastStreaks] = useState<DailyStreak[]>([]);
   const [notesInput, setNotesInput] = useState(todayStreak?.notes || '');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
+  const [notifSettings, setNotifSettings] = useState<NotificationSettings>(getNotificationSettings());
+  const [permStatus, setPermStatus] = useState<string>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
+  );
 
   const targetGlasses = mlToGlasses(profile.dailyWaterGoalMl);
   const currentGlasses = todayStreak?.waterGlasses || 0;
@@ -60,8 +74,8 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
   }, [todayStreak]);
 
   const updateTodayHabit = async (updates: Partial<DailyStreak>) => {
-    if (!todayStreak?.id) return;
-    const nextState = { ...todayStreak, ...updates };
+    const streak = await getOrCreateTodayStreak();
+    const nextState = { ...streak, ...updates };
 
     // Comprobar si cumple todos los hábitos clave
     const allDone = (
@@ -71,27 +85,63 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
       nextState.calorieGoalMet
     );
 
-    await db.dailyStreaks.update(todayStreak.id, {
+    await db.dailyStreaks.update(streak.id!, {
       ...updates,
       allCompleted: allDone
     });
 
-    if (allDone && !todayStreak.allCompleted) {
+    if (allDone && !streak.allCompleted) {
       try {
         confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
       } catch (_) {}
     }
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('downpeso:data-updated'));
+    }
     onRefreshData();
     await loadStreakData();
   };
 
   const handleSaveNotes = async () => {
-    if (!todayStreak?.id) return;
     setIsSavingNotes(true);
-    await db.dailyStreaks.update(todayStreak.id, { notes: notesInput });
-    setIsSavingNotes(false);
-    onRefreshData();
+    try {
+      const streak = await getOrCreateTodayStreak();
+      await db.dailyStreaks.update(streak.id!, { notes: notesInput });
+      setSaveSuccessMsg(true);
+      setTimeout(() => setSaveSuccessMsg(false), 3500);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('downpeso:data-updated'));
+      }
+      onRefreshData();
+      await loadStreakData();
+    } catch (err) {
+      console.error('Error al guardar nota:', err);
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
+
+  const handleToggleNotifications = (enabled: boolean) => {
+    const updated = { ...notifSettings, enabled };
+    setNotifSettings(updated);
+    saveNotificationSettings(updated);
+  };
+
+  const handleIntervalChange = (intervalMinutes: number) => {
+    const updated = { ...notifSettings, intervalMinutes };
+    setNotifSettings(updated);
+    saveNotificationSettings(updated);
+  };
+
+  const handleRequestPermission = async () => {
+    const res = await requestNotificationPermission();
+    setPermStatus(res);
+  };
+
+  const handleTestNotification = async () => {
+    await triggerSmartHydrationReminder(true);
   };
 
   return (
@@ -319,28 +369,130 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
         </div>
       </div>
 
-      {/* Notas Diarias & Reflexión */}
+      {/* Notas Diarias & Reflexión para Otto */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 text-sm font-bold">
             <Edit3 className="w-4 h-4 text-emerald-600" />
-            Reflexión o Notas del Día
+            <span>Reflexión o Notas del Día</span>
           </div>
-          <button
-            onClick={handleSaveNotes}
-            disabled={isSavingNotes}
-            className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
-          >
-            {isSavingNotes ? 'Guardando...' : 'Guardar Nota'}
-          </button>
+          <div className="flex items-center gap-3">
+            {saveSuccessMsg && (
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 animate-in fade-in flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                ¡Guardada para Otto!
+              </span>
+            )}
+            <button
+              onClick={handleSaveNotes}
+              disabled={isSavingNotes}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 active:scale-95 disabled:opacity-50"
+            >
+              {isSavingNotes ? 'Guardando...' : 'Guardar Nota'}
+            </button>
+          </div>
         </div>
         <textarea
-          rows={2}
-          placeholder="¿Cómo te sentiste hoy? (Ej. Mucha energía en la mañana, un poco de hambre a las 4pm pero tomé infusión de Jamaica...)"
+          rows={3}
+          placeholder="¿Cómo te sentiste hoy? (Ej. Mucha energía en la mañana, un poco de hambre a las 4pm pero tomé infusión de Jamaica... Otto leerá estas notas para adaptar sus consejos)"
           value={notesInput}
           onChange={(e) => setNotesInput(e.target.value)}
-          className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+          className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3.5 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-all leading-relaxed"
         />
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+          <span>Otto aprende de tus emociones, digestión y reflexiones para ofrecerte consejos y sugerencias a tu medida.</span>
+        </p>
+      </div>
+
+      {/* Recordatorios Inteligentes de Hidratación con Otto */}
+      <div className="bg-gradient-to-br from-cyan-50/70 via-white to-blue-50/50 dark:from-slate-900 dark:via-slate-900 dark:to-cyan-950/20 rounded-3xl p-6 border border-cyan-200/80 dark:border-cyan-800/60 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="p-3 bg-cyan-600 text-white rounded-2xl shadow-md shadow-cyan-600/20 shrink-0">
+              <Bell className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Recordatorios Inteligentes de Agua con Otto
+                </h3>
+                <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300">
+                  Acciones Rápidas
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                Avisos con botones de <strong>"¡Ya tomé!" (+1 vaso)</strong> y <strong>"En 5 minutos"</strong> para no perder tu racha.
+              </p>
+            </div>
+          </div>
+
+          {/* Switch de activación */}
+          <label className="relative inline-flex items-center cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={notifSettings.enabled}
+              onChange={(e) => handleToggleNotifications(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:width-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+            <span className="ml-2.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+              {notifSettings.enabled ? 'Activos' : 'Pausados'}
+            </span>
+          </label>
+        </div>
+
+        {notifSettings.enabled && (
+          <div className="pt-2 border-t border-cyan-100 dark:border-cyan-900/40 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-semibold">
+                <Clock className="w-4 h-4 text-cyan-600" />
+                <span>Intervalo entre avisos:</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[45, 60, 90, 120].map((mins) => (
+                  <button
+                    key={mins}
+                    onClick={() => handleIntervalChange(mins)}
+                    className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                      notifSettings.intervalMinutes === mins
+                        ? 'bg-cyan-600 text-white shadow-sm scale-105'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-cyan-400'
+                    }`}
+                  >
+                    {mins} min
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              {/* Botón de permiso nativo si no está granted */}
+              {permStatus !== 'granted' ? (
+                <button
+                  onClick={handleRequestPermission}
+                  className="text-xs font-bold text-cyan-700 dark:text-cyan-300 hover:underline flex items-center gap-1"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  Activar también notificaciones del navegador
+                </button>
+              ) : (
+                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Notificaciones nativas habilitadas
+                </span>
+              )}
+
+              {/* Botón para probar aviso ahora */}
+              <button
+                onClick={handleTestNotification}
+                className="px-3.5 py-1.5 rounded-xl bg-cyan-100 dark:bg-cyan-950/60 hover:bg-cyan-200 dark:hover:bg-cyan-900 text-cyan-800 dark:text-cyan-200 text-xs font-bold transition-colors flex items-center gap-1.5"
+              >
+                <Droplets className="w-3.5 h-3.5 text-cyan-600" />
+                Probar aviso de Otto ahora
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Historial Reciente de Hábitos */}

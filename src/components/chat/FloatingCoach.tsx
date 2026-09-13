@@ -30,14 +30,14 @@ export const FloatingCoach: React.FC<FloatingCoachProps> = ({
         <div className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-40 flex items-center gap-2 group animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="hidden sm:flex items-center px-3 py-1.5 rounded-full bg-slate-900/90 dark:bg-slate-800/90 text-white text-xs font-bold shadow-lg border border-slate-700/60 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             <Sparkles className="w-3 h-3 text-emerald-400 mr-1.5" />
-            Hablar con mi Coach
+            Hablar con Otto
           </div>
 
           <button
             onClick={() => setIsOpen(true)}
             className="relative p-3.5 sm:p-4 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-xl shadow-emerald-700/35 transition-all hover:scale-110 active:scale-95 focus:outline-none focus:ring-4 focus:ring-emerald-500/30"
-            aria-label="Abrir asistente de IA flotante"
-            title="Abrir Consejero IA"
+            aria-label="Abrir asistente de IA flotante Otto"
+            title="Abrir chat con Otto"
           >
             <MessageSquareHeart className="w-6 h-6 fill-current text-white" />
             <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
@@ -60,10 +60,10 @@ export const FloatingCoach: React.FC<FloatingCoachProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-black tracking-tight leading-tight">
-                    DownPeso Coach
+                    Otto - Coach Personal
                   </h3>
                   <p className="text-[10px] text-emerald-100 font-medium">
-                    Asistente activo con memoria en tiempo real
+                    Aprende de tus hábitos y reflexiones en tiempo real
                   </p>
                 </div>
               </div>

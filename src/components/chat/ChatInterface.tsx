@@ -133,9 +133,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
           {cleanedText}
         </div>
 
-        {/* Acciones ejecutadas automáticamente por el Coach */}
+        {/* Acciones ejecutadas automáticamente por Otto */}
         {msg.executedActions && msg.executedActions.length > 0 && (
           <div className="mt-2.5 space-y-1.5">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
+              ⚡ Acciones anotadas automáticamente por Otto:
+            </span>
             {msg.executedActions.map((action, i) => (
               <div
                 key={i}
@@ -184,12 +187,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white">
-                Consejero IA DownPeso
+                Otto - Tu Coach Personal
               </h2>
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Conoce tu meta ({profile.targetWeight} kg) y recuerda tus hábitos locales
+              Conoce tu meta ({profile.targetWeight} kg) y aprende de tus hábitos y notas
             </p>
           </div>
         </div>
@@ -228,10 +231,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
             </div>
             <div className="max-w-md space-y-1">
               <h3 className="text-base font-black text-slate-900 dark:text-white">
-                ¡Hola {profile.name}! Soy tu Consejero Personal
+                ¡Hola {profile.name}! Soy Otto, tu Coach Personal
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                Estoy aquí para orientarte en tus comidas cotidianas, ayudarte a vencer la ansiedad de media tarde, sugerirte recetas con lo que tengas a mano y mantenerte enfocado en tu objetivo de <strong>{profile.targetWeight} kg</strong>.
+                Estoy aquí para orientarte en tus comidas cotidianas, motivarte con tus hábitos, aprender de tus reflexiones del diario y mantenerte enfocado en tu objetivo de <strong>{profile.targetWeight} kg</strong>.
               </p>
             </div>
 
@@ -306,7 +309,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
             </div>
             <div className="p-3.5 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-bl-none flex items-center gap-2 border border-slate-200/60 dark:border-slate-700/60">
               <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-              <span>DownPeso Coach está pensando...</span>
+              <span>Otto está pensando...</span>
             </div>
           </div>
         )}
@@ -347,7 +350,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
         >
           <input
             type="text"
-            placeholder="Pregúntale a tu consejero o cuéntale qué comiste hoy..."
+            placeholder="Pregúntale a Otto, o cuéntale qué tomaste, comiste o hiciste hoy..."
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             disabled={isLoading}

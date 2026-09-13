@@ -88,6 +88,41 @@ async function buildSystemInstruction(profile: UserProfile): Promise<string> {
     }
   }
 
+  // Cargar las reflexiones y notas escritas por el usuario en su diario de hábitos (últimos 7 días)
+  const recentNotesStreaks = await db.dailyStreaks
+    .orderBy('date')
+    .reverse()
+    .filter(s => !!s.notes && s.notes.trim().length > 0)
+    .limit(7)
+    .toArray();
+
+  const notesSummary = recentNotesStreaks.length > 0
+    ? recentNotesStreaks.map(s => `• [${s.date}]: "${(s.notes || '').trim()}"`).join('\n')
+    : 'Aún no ha escrito reflexiones en su diario de hábitos.';
+
+  // Cargar métricas de consistencia de la última semana
+  const last7DaysStreaks = await db.dailyStreaks
+    .orderBy('date')
+    .reverse()
+    .limit(7)
+    .toArray();
+
+  const exerciseDaysCount = last7DaysStreaks.filter(s => s.exerciseCompleted).length;
+  const avgGlasses = last7DaysStreaks.length > 0
+    ? (last7DaysStreaks.reduce((acc, s) => acc + (s.waterGlasses || 0), 0) / last7DaysStreaks.length).toFixed(1)
+    : '0';
+
+  // Cargar progreso de peso reciente
+  const recentWeights = await db.weightRecords
+    .orderBy('date')
+    .reverse()
+    .limit(3)
+    .toArray();
+
+  const weightProgressStr = recentWeights.length > 0
+    ? recentWeights.map(w => `${w.date}: ${w.weight} kg`).join(' → ')
+    : `${profile.currentWeight} kg (peso inicial)`;
+
   const foodSummary = todayFood.length > 0
     ? todayFood.map(f => `• [${f.mealType.toUpperCase()} ${f.time}]: ${f.description} (~${f.estimatedCalories} kcal)`).join('\n')
     : 'No hay comidas registradas aún hoy.';
@@ -96,11 +131,12 @@ async function buildSystemInstruction(profile: UserProfile): Promise<string> {
     ? `Agua tomada hoy: ${todayStreak.waterGlasses} vasos de 250ml (${todayStreak.waterGlasses * 250}ml / Meta: ${profile.dailyWaterGoalMl}ml). Ejercicio completado: ${todayStreak.exerciseCompleted ? 'SÍ' : 'Aún no'}. Porciones vegetales: ${todayStreak.vegetablesPortions}.`
     : 'Sin registros de racha hoy todavía.';
 
-  return `Eres "DownPeso Coach By ChrizDev", un asesor y mentor experto en nutrición casera, hábitos saludables y reducción de peso sostenible.
+  return `Eres "Otto", el coach personal e hiper-inteligente de nutrición casera, hábitos y reducción de peso de DownPeso By ChrizDev.
 Tu misión es guiar al usuario con empatía, base científica, calidez y practicidad.
+Tu mayor valor es que APRENDES continuamente de todo lo que ${profile.name} hace, anota y conversa contigo. Recuerdas sus notas, dificultades, alimentos favoritos y logros.
 
-DATOS DEL USUARIO:
-- Nombre: ${profile.name} (Salúdalo siempre cordialmente por su nombre o haz referencia a él de forma cercana).
+DATOS ANTROPOMÉTRICOS DEL USUARIO:
+- Nombre: ${profile.name} (Salúdalo con cercanía como Otto)
 - Edad: ${profile.age} años | Estatura: ${profile.height} cm
 - Peso actual: ${profile.currentWeight} kg | Peso meta: ${profile.targetWeight} kg (${kgToLose > 0 ? `Meta: bajar ${kgToLose} kg` : '¡En peso objetivo o mantenimiento!'})
 - IMC: ${profile.bmi} | TMB: ${profile.bmr} kcal | Gasto Total (TDEE): ${profile.tdee} kcal
@@ -108,18 +144,28 @@ DATOS DEL USUARIO:
 - Nivel de actividad: ${profile.activityLevel}
 - Preferencias o restricciones del usuario: ${profile.dietPreferences || 'Ninguna especificada'}
 
-MEMORIA ADAPTATIVA DEL USUARIO (Patrones y aprendizajes previos):
+CONOCIMIENTO PROFUNDO Y APRENDIZAJES ACUMULADOS DE OTTO SOBRE ${profile.name.toUpperCase()}:
+1. Memoria cognitiva a largo plazo (hábitos y patrones detectados):
 ${memoryContext}
+
+2. Reflexiones personales y notas del diario de hábitos escritas por el usuario (¡Úsalas para aconsejarlo con empatía y recordar cómo se siente!):
+${notesSummary}
+
+3. Consistencia en hábitos (Últimos 7 días):
+- Ejercicio realizado: ${exerciseDaysCount} de los últimos ${last7DaysStreaks.length} días registrados.
+- Promedio de hidratación: ~${avgGlasses} vasos de agua/día.
+- Historial reciente de pesajes: ${weightProgressStr}
 
 ESTADO DE HOY (${today}):
 ${streakSummary}
 Comidas registradas hoy:
 ${foodSummary}
 
-DIRECTRICES DE TUS RESPUESTAS:
-1. Siempre reconoce sus avances y sé positivo pero realista. No recomiendes dietas milagro ni restricciones extremas.
-2. Promueve comida casera, accesible y económica (ingredientes tradicionales como huevo, avena, verduras de mercado, legumbres, atún).
-3. SUPERPODER DE REGISTRO AUTOMÁTICO (ASISTENTE INTEGRAL):
+DIRECTRICES DE TUS RESPUESTAS (COACH OTTO):
+1. Preséntate y actúa siempre como Otto. Sé positivo, empático, realista y científico sin ser aburrido.
+2. UTILIZA LO QUE HAS APRENDIDO DE ÉL: Si en sus notas o hábitos ves que ha tenido antojos por la tarde, cansancio, o por el contrario un gran día de energía y constancia, menciónalo sutilmente para que sepa que Otto realmente lo conoce y recuerda su progreso.
+3. Promueve comida casera, accesible y económica (huevo, avena, verduras de mercado, legumbres, atún).
+4. SUPERPODER DE REGISTRO AUTOMÁTICO (ASISTENTE INTEGRAL):
 Tienes el poder de registrar y modificar directamente los hábitos y datos del usuario en la base de datos de la app.
 Cuando el usuario te cuente que tomó agua, comió algo, hizo ejercicio, consumió vegetales o se pesó, respóndele de forma natural y cálida confirmándole que ya lo anotaste por él en su diario de hoy, e INCLUYE al final de tu respuesta la acción técnica en esta sintaxis EXACTA:
 - Si tomó agua (ej. "tomé 3 vasos de agua", "me tomé un vaso"):
@@ -135,8 +181,8 @@ Cuando el usuario te cuente que tomó agua, comió algo, hizo ejercicio, consumi
 
 REGLA DE ORO DE INTERFAZ:
 NUNCA escribas JSON, ni corchetes crudos, ni [LOG_SUGGESTION] en tu texto conversacional visible. Toda acción debe ir dentro de <<<ACTION:{...}>>>. El sistema la procesará y la ocultará automáticamente del chat.
-4. Si pide recetas o ejercicios, adapta la recomendación a su nivel y condición articular (siempre prioriza bajo impacto si hay sobrepeso).
-5. Habla en español con tono motivador, profesional y cercano.`;
+5. Si pide recetas o ejercicios, adapta la recomendación a su nivel y condición articular (siempre prioriza bajo impacto si hay sobrepeso).
+6. Habla en español con tono motivador, profesional y cercano.`;
 }
 
 /**
@@ -191,7 +237,7 @@ export async function executeAndCleanCoachActions(
             description,
             estimatedCalories,
             healthyRating,
-            aiFeedback: 'Anotado automáticamente por tu Consejero IA'
+            aiFeedback: 'Anotado automáticamente por Otto'
           };
           await db.foodLogs.add(newFood);
           executedActions.push({
@@ -235,7 +281,7 @@ export async function executeAndCleanCoachActions(
             await db.weightRecords.add({
               date: today,
               weight: newWeight,
-              note: 'Anotado por tu Consejero IA'
+              note: 'Anotado por Otto'
             });
             executedActions.push({
               type: 'record_weight',
@@ -383,24 +429,39 @@ export async function triggerMemorySummarizationIfNeeded(): Promise<void> {
     .map(m => `${m.role.toUpperCase()}: ${m.content}`)
     .join('\n');
 
+  // Extraer también notas recientes de hábitos para alimentar la memoria consolidada
+  const recentStreakNotes = await db.dailyStreaks
+    .orderBy('date')
+    .reverse()
+    .filter(s => !!s.notes && s.notes.trim().length > 0)
+    .limit(5)
+    .toArray();
+
+  const notesTranscript = recentStreakNotes.length > 0
+    ? recentStreakNotes.map(n => `• [${n.date}]: "${(n.notes || '').trim()}"`).join('\n')
+    : 'Sin notas adicionales escritas.';
+
   const existingMemory = await db.aiMemorySummary.toCollection().first();
 
-  const prompt = `Analiza este fragmento de conversación entre el usuario ${profile.name} y el asistente de salud.
-Extrae y actualiza un resumen conciso de máximo 150 palabras con:
+  const prompt = `Analiza estas conversaciones y notas de diario entre el usuario ${profile.name} y su coach Otto.
+Extrae y actualiza un resumen conciso de máximo 180 palabras con:
 1. Preferencias alimenticias o gustos descubiertos.
-2. Dificultades, antojos o barreras mencionadas.
-3. Hábitos positivos que el usuario está logrando.
+2. Dificultades emocionales, antojos o estados de energía reportados.
+3. Hábitos positivos y progresos que el usuario está logrando.
 4. Cualquier lesión o condición física relevante.
 
-MEMORIA PREVIA EXISTENTE:
+MEMORIA PREVIA EXISTENTE DE OTTO:
 ${existingMemory?.summaryText || 'Ninguna'}
 
-TRANSCRIPCIÓN RECIENTE:
+REFLEXIONES RECIENTES EN SU DIARIO DE HÁBITOS:
+${notesTranscript}
+
+TRANSCRIPCIÓN RECIENTE DE CHARLAS CON OTTO:
 ${conversationTranscript}
 
 Responde ÚNICAMENTE en formato JSON plano:
 {
-  "summaryText": "Resumen integrado y actualizado de 2 o 3 párrafos cortos.",
+  "summaryText": "Resumen integrado y actualizado de 2 o 3 párrafos cortos que Otto recordará.",
   "learnedHabits": ["hábito 1", "hábito 2"],
   "restrictions": ["restricción 1"]
 }`;

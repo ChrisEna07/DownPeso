@@ -25,7 +25,7 @@ interface TabItem {
 
 const TABS: TabItem[] = [
   { id: 'dashboard', label: 'Inicio', shortLabel: 'Inicio', icon: LayoutDashboard },
-  { id: 'chat', label: 'Consejero IA', shortLabel: 'Asistente', icon: MessageSquareHeart },
+  { id: 'chat', label: 'Otto Coach IA', shortLabel: 'Otto', icon: MessageSquareHeart },
   { id: 'recipes', label: 'Recetario Casero', shortLabel: 'Recetas', icon: UtensilsCrossed },
   { id: 'exercises', label: 'Ejercicios', shortLabel: 'Rutinas', icon: Dumbbell },
   { id: 'remedies', label: 'Botiquín Natural', shortLabel: 'Infusiones', icon: Leaf },

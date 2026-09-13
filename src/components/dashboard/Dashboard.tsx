@@ -378,7 +378,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </button>
           </div>
 
-          {/* Hábito 4: Consejero IA */}
+          {/* Hábito 4: Otto Coach IA */}
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-purple-100 dark:bg-purple-950 text-purple-600 rounded-xl">
@@ -386,17 +386,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div>
                 <span className="text-sm font-bold block text-slate-800 dark:text-slate-200">
-                  Asesoría IA
+                  Coach Otto IA
                 </span>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {todayFoodLogs.length} comidas registradas
+                  {todayFoodLogs.length > 0 ? `${todayFoodLogs.length} comidas anotadas` : 'Habla o anota con Otto'}
                 </span>
               </div>
             </div>
             <button
               onClick={() => onNavigateTab('chat')}
               className="p-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold transition-transform active:scale-95"
-              aria-label="Abrir chat de consejero"
+              aria-label="Abrir chat con Otto"
             >
               <ArrowRight className="w-4 h-4" />
             </button>
