@@ -7,14 +7,103 @@ import { getAppSettings, saveAppSettings, applyTheme, applyFontSize } from './se
 import { getLanguagePromptInstruction } from './i18n';
 import { showFeedback } from './feedback';
 
-// Modelos oficiales de Google Gemini en orden de prioridad, velocidad y estabilidad
+// Modelos oficiales y estables de Google Gemini en orden de prioridad, resiliencia y velocidad
 export const CANDIDATE_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
   'gemini-2.0-flash',
+  'gemini-2.5-flash',
   'gemini-2.0-flash-lite',
-  'gemini-1.5-flash'
+  'gemini-2.5-flash-lite',
+  'gemini-flash-latest'
 ];
+
+/**
+ * Sanea y repara el historial conversacional en IndexedDB si han quedado
+ * mensajes de usuario huérfanos sin respuesta debido a fallos previos de red.
+ */
+export async function sanitizeChatHistory(): Promise<void> {
+  try {
+    const all = await db.chatHistory.orderBy('id').toArray();
+    if (all.length === 0) return;
+
+    const toDeleteIds: number[] = [];
+
+    for (let i = 0; i < all.length; i++) {
+      const current = all[i];
+      const next = all[i + 1];
+
+      // Si es un mensaje de usuario y el siguiente también es de usuario, el actual nunca fue respondido
+      if (current.role === 'user' && next && next.role === 'user') {
+        if (current.id) toDeleteIds.push(current.id);
+      }
+
+      // Si es el último mensaje del historial y es de usuario (quedó huérfano por error previo)
+      if (i === all.length - 1 && current.role === 'user') {
+        if (current.id) toDeleteIds.push(current.id);
+      }
+    }
+
+    if (toDeleteIds.length > 0) {
+      await db.chatHistory.bulkDelete(toDeleteIds);
+      console.info(`Historial de chat saneado: ${toDeleteIds.length} mensaje(s) huérfano(s) limpiado(s).`);
+    }
+  } catch (err) {
+    console.warn('Aviso saneando historial de chat:', err);
+  }
+}
+
+/**
+ * Construye y cura el contenido multi-turno para la API de Gemini garantizando
+ * alternancia estricta entre 'user' y 'model' para evitar errores HTTP 400.
+ */
+export function buildCuratedChatContents(
+  history: Array<{ role: string; content: string }>,
+  currentUserMessage: string
+): Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> {
+  const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+  // Filtrar mensajes vacíos
+  const validHistory = history.filter(
+    m => m && typeof m.content === 'string' && m.content.trim().length > 0
+  );
+
+  for (const msg of validHistory) {
+    const role: 'user' | 'model' = msg.role === 'assistant' ? 'model' : 'user';
+    const text = msg.content.trim();
+
+    if (contents.length === 0) {
+      // El historial DEBE comenzar siempre con un turno 'user'
+      if (role === 'user') {
+        contents.push({ role: 'user', parts: [{ text }] });
+      }
+    } else {
+      const lastItem = contents[contents.length - 1];
+      if (lastItem.role === role) {
+        // Fusionar turnos consecutivos del mismo rol
+        lastItem.parts[0].text += `\n\n${text}`;
+      } else {
+        contents.push({ role, parts: [{ text }] });
+      }
+    }
+  }
+
+  // Incorporar el mensaje actual del usuario al final
+  const trimmedCurrent = currentUserMessage.trim();
+  if (trimmedCurrent) {
+    if (contents.length === 0) {
+      contents.push({ role: 'user', parts: [{ text: trimmedCurrent }] });
+    } else {
+      const lastItem = contents[contents.length - 1];
+      if (lastItem.role === 'user') {
+        // Si el último turno del historial fue 'user' (ej. fallo previo no respondido), fusionamos
+        lastItem.parts[0].text += `\n\n${trimmedCurrent}`;
+      } else {
+        contents.push({ role: 'user', parts: [{ text: trimmedCurrent }] });
+      }
+    }
+  }
+
+  return contents;
+}
 
 /**
  * Ejecuta generateContent probando modelos alternativos en caso de sobrecarga, cuota, alta demanda o incompatibilidad
@@ -29,6 +118,8 @@ async function generateContentWithFallback(
   }
 ) {
   let lastError: any = null;
+  const failureDetails: string[] = [];
+
   for (let i = 0; i < CANDIDATE_MODELS.length; i++) {
     const model = CANDIDATE_MODELS[i];
     try {
@@ -37,30 +128,96 @@ async function generateContentWithFallback(
       if (params.temperature !== undefined) config.temperature = params.temperature;
       if (params.responseMimeType) config.responseMimeType = params.responseMimeType;
 
-      return await client.models.generateContent({
+      const result = await client.models.generateContent({
         model,
         contents: params.contents,
         config
       });
+
+      if (result) {
+        return result;
+      }
     } catch (err: any) {
       lastError = err;
       const errMsg = String(err?.message || '').toLowerCase();
       console.warn(`Aviso de Gemini con modelo [${model}]:`, err?.message);
+      failureDetails.push(`[${model}]: ${err?.message || err}`);
 
       // Si es un error de clave API no autorizada o inválida, no iterar en vano
-      if (errMsg.includes('api_key_invalid') || errMsg.includes('api key not valid')) {
-        throw err;
+      if (
+        errMsg.includes('api_key_invalid') ||
+        errMsg.includes('api key not valid') ||
+        errMsg.includes('permission_denied') ||
+        errMsg.includes('forbidden') ||
+        errMsg.includes('403')
+      ) {
+        throw new Error('La Gemini API Key ingresada no es válida o no tiene permisos. Revisa tu clave en el perfil o en ajustes.');
       }
 
-      // Para cualquier otro error (high demand, overloaded, 503, 429, 404, not found, resource_exhausted, timeout),
-      // probamos inmediatamente el siguiente modelo candidato disponible
+      // Probar el siguiente modelo candidato disponible
       if (i < CANDIDATE_MODELS.length - 1) {
         console.info(`Probando modelo alternativo de respaldo: ${CANDIDATE_MODELS[i + 1]}...`);
         continue;
       }
     }
   }
-  throw lastError;
+
+  // Si los modelos estáticos fallaron, intentar descubrir dinámicamente modelos habilitados en la cuenta
+  try {
+    console.info('Consultando modelos disponibles en la cuenta...');
+    const listResponse = await client.models.list({ config: { pageSize: 30 } });
+    const dynamicCandidates: string[] = [];
+    for await (const m of listResponse) {
+      const rawName = (m.name || '').replace(/^models\//, '');
+      if (
+        rawName &&
+        !CANDIDATE_MODELS.includes(rawName) &&
+        (rawName.includes('flash') || rawName.includes('gemini')) &&
+        !rawName.includes('1.5') &&
+        !rawName.includes('image') &&
+        !rawName.includes('embed')
+      ) {
+        dynamicCandidates.push(rawName);
+      }
+    }
+
+    for (const dModel of dynamicCandidates) {
+      try {
+        console.info(`Probando modelo descubierto dinámicamente: ${dModel}...`);
+        const config: any = {};
+        if (params.systemInstruction) config.systemInstruction = params.systemInstruction;
+        if (params.temperature !== undefined) config.temperature = params.temperature;
+        if (params.responseMimeType) config.responseMimeType = params.responseMimeType;
+
+        return await client.models.generateContent({
+          model: dModel,
+          contents: params.contents,
+          config
+        });
+      } catch (err: any) {
+        lastError = err;
+        failureDetails.push(`[${dModel}]: ${err?.message || err}`);
+      }
+    }
+  } catch (listErr) {
+    console.warn('No se pudo consultar list_models:', listErr);
+  }
+
+  // Analizar causas de falla acumuladas
+  const combinedErrors = failureDetails.join(' | ');
+  if (
+    combinedErrors.includes('high demand') ||
+    combinedErrors.includes('503') ||
+    combinedErrors.includes('overloaded') ||
+    combinedErrors.includes('spikes in demand')
+  ) {
+    throw new Error('Los servidores de Google Gemini reportan alta demanda temporal en estos momentos. Por favor espera unos segundos y pulsa "Reintentar".');
+  }
+  if (combinedErrors.includes('429') || combinedErrors.includes('resource_exhausted')) {
+    throw new Error('Límite de cuota alcanzado temporalmente en Google AI. Espera unos momentos antes de volver a intentar.');
+  }
+
+  throw lastError || new Error('No se pudo conectar con los servidores de Google Gemini.');
 }
 
 /**
@@ -458,10 +615,18 @@ export async function executeAndCleanCoachActions(
  * Envía un mensaje conversacional al modelo Gemini y obtiene respuesta
  */
 export async function sendChatMessage(userMessage: string): Promise<string> {
+  const trimmed = userMessage.trim();
+  if (!trimmed) {
+    throw new Error('El mensaje no puede estar vacío.');
+  }
+
   const context = await getGeminiClient();
   if (!context) {
     throw new Error('No se ha configurado una Gemini API Key válida. Por favor configúrala en el perfil.');
   }
+
+  // Saneamiento preventivo de historial previo por si quedaron mensajes huérfanos
+  await sanitizeChatHistory();
 
   const { client, profile } = context;
   const systemInstruction = await buildSystemInstruction(profile);
@@ -474,38 +639,28 @@ export async function sendChatMessage(userMessage: string): Promise<string> {
     .toArray();
   recentMessages.reverse();
 
-  // Guardar mensaje de usuario en BD
-  await db.chatHistory.add({
-    role: 'user',
-    content: userMessage,
-    timestamp: new Date().toISOString()
-  });
-
-  // Estructurar contenido para Gemini
-  const contents = recentMessages.map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }]
-  }));
-
-  // Añadir el mensaje actual
-  contents.push({
-    role: 'user',
-    parts: [{ text: userMessage }]
-  });
+  // Curar historial asegurando rigurosa alternancia user -> model -> user
+  const contents = buildCuratedChatContents(recentMessages, trimmed);
 
   try {
     const response = await generateContentWithFallback(client, {
-      contents: contents as any,
-      systemInstruction: systemInstruction,
+      contents,
+      systemInstruction,
       temperature: 0.7
     });
 
     const rawReply = response.text || 'No pude generar una respuesta en este momento. Intenta de nuevo.';
 
-    // Procesar y ejecutar cualquier acción automática (agua, comidas, ejercicio, peso)
+    // Procesar y ejecutar cualquier acción autónoma (agua, comidas, ejercicio, peso, notas, tema, etc.)
     const { cleanText, executedActions } = await executeAndCleanCoachActions(rawReply, profile);
 
-    // Guardar respuesta limpia del asistente en BD con sus acciones ejecutadas
+    // Guardar el mensaje del usuario y la respuesta de Otto en IndexedDB una vez confirmada la respuesta
+    await db.chatHistory.add({
+      role: 'user',
+      content: trimmed,
+      timestamp: new Date().toISOString()
+    });
+
     await db.chatHistory.add({
       role: 'assistant',
       content: cleanText,
@@ -538,16 +693,22 @@ export async function sendChatMessage(userMessage: string): Promise<string> {
       }
     } catch (_) {}
 
-    if (errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('403')) {
-      throw new Error('La Gemini API Key ingresada no es válida o no tiene permisos. Revisa tu clave en Configuración.');
+    if (errorMsg.includes('API_KEY_INVALID') || errorMsg.includes('api key not valid') || errorMsg.includes('403')) {
+      throw new Error('La Gemini API Key ingresada no es válida o no tiene permisos en Google AI Studio. Revisa tu clave en Configuración.');
+    }
+    if (
+      errorMsg.includes('alta demanda') ||
+      errorMsg.includes('high demand') ||
+      errorMsg.includes('503') ||
+      errorMsg.includes('overloaded') ||
+      errorMsg.includes('spikes in demand')
+    ) {
+      throw new Error('Los servidores de Google Gemini reportan alta demanda temporal en estos momentos. Otto ha probado los modelos disponibles; por favor pulsa "Reintentar" en unos segundos.');
     }
     if (errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('429')) {
-      throw new Error('Límite de cuota alcanzado temporalmente en la API de Google. Por favor espera unos segundos antes de volver a enviar.');
+      throw new Error('Límite de peticiones alcanzado en tu cuenta gratuita de Google AI. Espera un momento antes de volver a enviar.');
     }
-    if (errorMsg.includes('high demand') || errorMsg.includes('503') || errorMsg.includes('overloaded') || errorMsg.includes('spikes in demand')) {
-      throw new Error('Los servidores de Google AI reportan una alta demanda temporal. Otto ha cambiado a modelos alternativos rápidos, por favor pulsa enviar de nuevo.');
-    }
-    throw new Error(`Error de conexión con la IA: ${errorMsg}`);
+    throw new Error(errorMsg || 'Error de conexión con la IA. Intenta de nuevo.');
   }
 }
 

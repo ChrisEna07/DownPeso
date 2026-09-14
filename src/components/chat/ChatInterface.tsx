@@ -11,10 +11,11 @@ import {
   CheckCircle2,
   Info,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import { db, getTodayDateString } from '@/lib/db';
-import { sendChatMessage, triggerMemorySummarizationIfNeeded } from '@/lib/gemini';
+import { sendChatMessage, triggerMemorySummarizationIfNeeded, sanitizeChatHistory } from '@/lib/gemini';
 import { showFeedback } from '@/lib/feedback';
 import { t } from '@/lib/i18n';
 import confetti from 'canvas-confetti';
@@ -40,6 +41,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingUserText, setPendingUserText] = useState<string | null>(null);
+  const [lastFailedText, setLastFailedText] = useState<string | null>(null);
   const [memorySummary, setMemorySummary] = useState<AIMemorySummary | null>(null);
   const [showMemoryModal, setShowMemoryModal] = useState(false);
   const [loggedSuggestions, setLoggedSuggestions] = useState<Record<number, boolean>>({});
@@ -48,6 +51,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
 
   // Cargar historial y resumen de memoria
   const loadChat = async () => {
+    await sanitizeChatHistory();
     const history = await db.chatHistory.orderBy('id').toArray();
     setMessages(history);
 
@@ -64,7 +68,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, pendingUserText]);
 
   const handleSendMessage = async (textToSend?: string) => {
     const content = (textToSend || inputText).trim();
@@ -72,13 +76,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
 
     setInputText('');
     setErrorMessage(null);
+    setLastFailedText(null);
+    setPendingUserText(content);
     setIsLoading(true);
 
     try {
       await sendChatMessage(content);
+      setPendingUserText(null);
       await loadChat();
     } catch (err: any) {
       console.error('Error enviando mensaje:', err);
+      setPendingUserText(null);
+      setLastFailedText(content);
       setErrorMessage(err.message || 'Error al comunicarse con el asistente.');
     } finally {
       setIsLoading(false);
@@ -346,6 +355,21 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
           })
         )}
 
+        {/* Burbuja optimista del usuario mientras Otto procesa la respuesta */}
+        {pendingUserText && (
+          <div className="flex gap-3 justify-end animate-in fade-in duration-200">
+            <div className="max-w-[85%] sm:max-w-[75%] rounded-3xl p-4 shadow-sm bg-emerald-600 text-white rounded-br-none opacity-90">
+              <p className="whitespace-pre-wrap leading-relaxed text-sm">{pendingUserText}</p>
+              <div className="text-[10px] mt-1.5 font-medium text-emerald-200 text-right flex items-center justify-end gap-1">
+                <span>Enviando a Otto...</span>
+              </div>
+            </div>
+            <div className="w-8 h-8 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center shrink-0 shadow-sm mt-1 font-bold text-xs">
+              <User className="w-4 h-4" />
+            </div>
+          </div>
+        )}
+
         {isLoading && (
           <div className="flex gap-3 items-center text-slate-500 dark:text-slate-400 text-xs">
             <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
@@ -359,9 +383,36 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
         )}
 
         {errorMessage && (
-          <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorMessage}</span>
+          <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs space-y-3 shadow-sm animate-in fade-in">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-semibold">{errorMessage}</p>
+                <p className="text-[11px] text-rose-600/80 dark:text-rose-400/80 mt-1">
+                  Si el problema persiste, verifica que tu Gemini API Key en tu perfil esté activa y sin restricciones.
+                </p>
+              </div>
+            </div>
+            {lastFailedText && (
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage(lastFailedText)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Reintentar ahora
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearHistory}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs border border-slate-200 dark:border-slate-700 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Restablecer chat
+                </button>
+              </div>
+            )}
           </div>
         )}
 
