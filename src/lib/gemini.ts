@@ -7,15 +7,17 @@ import { getAppSettings, saveAppSettings, applyTheme, applyFontSize } from './se
 import { getLanguagePromptInstruction } from './i18n';
 import { showFeedback } from './feedback';
 
-// Modelos recomendados con fallback automático (iniciando por gemini-3.6-flash como solicita Google AI)
+// Modelos oficiales de Google Gemini en orden de prioridad, velocidad y estabilidad
 export const CANDIDATE_MODELS = [
-  'gemini-3.6-flash',
-  'gemini-3.7-flash',
-  'gemini-3.5-flash-lite'
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash'
 ];
 
 /**
- * Ejecuta generateContent probando los modelos candidatos en caso de 404 o deprecación
+ * Ejecuta generateContent probando modelos alternativos en caso de sobrecarga, cuota, alta demanda o incompatibilidad
  */
 async function generateContentWithFallback(
   client: GoogleGenAI,
@@ -27,7 +29,8 @@ async function generateContentWithFallback(
   }
 ) {
   let lastError: any = null;
-  for (const model of CANDIDATE_MODELS) {
+  for (let i = 0; i < CANDIDATE_MODELS.length; i++) {
+    const model = CANDIDATE_MODELS[i];
     try {
       const config: any = {};
       if (params.systemInstruction) config.systemInstruction = params.systemInstruction;
@@ -41,12 +44,20 @@ async function generateContentWithFallback(
       });
     } catch (err: any) {
       lastError = err;
-      const errMsg = String(err?.message || '');
-      if (errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('no longer available')) {
-        console.warn(`Modelo ${model} no disponible, probando siguiente candidato...`);
+      const errMsg = String(err?.message || '').toLowerCase();
+      console.warn(`Aviso de Gemini con modelo [${model}]:`, err?.message);
+
+      // Si es un error de clave API no autorizada o inválida, no iterar en vano
+      if (errMsg.includes('api_key_invalid') || errMsg.includes('api key not valid')) {
+        throw err;
+      }
+
+      // Para cualquier otro error (high demand, overloaded, 503, 429, 404, not found, resource_exhausted, timeout),
+      // probamos inmediatamente el siguiente modelo candidato disponible
+      if (i < CANDIDATE_MODELS.length - 1) {
+        console.info(`Probando modelo alternativo de respaldo: ${CANDIDATE_MODELS[i + 1]}...`);
         continue;
       }
-      throw err;
     }
   }
   throw lastError;
@@ -531,7 +542,10 @@ export async function sendChatMessage(userMessage: string): Promise<string> {
       throw new Error('La Gemini API Key ingresada no es válida o no tiene permisos. Revisa tu clave en Configuración.');
     }
     if (errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('429')) {
-      throw new Error('Límite de cuota alcanzado en Gemini API. Por favor espera un minuto antes de reintentar.');
+      throw new Error('Límite de cuota alcanzado temporalmente en la API de Google. Por favor espera unos segundos antes de volver a enviar.');
+    }
+    if (errorMsg.includes('high demand') || errorMsg.includes('503') || errorMsg.includes('overloaded') || errorMsg.includes('spikes in demand')) {
+      throw new Error('Los servidores de Google AI reportan una alta demanda temporal. Otto ha cambiado a modelos alternativos rápidos, por favor pulsa enviar de nuevo.');
     }
     throw new Error(`Error de conexión con la IA: ${errorMsg}`);
   }
