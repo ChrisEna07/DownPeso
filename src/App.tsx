@@ -70,12 +70,19 @@ export const App: React.FC = () => {
     initSmartNotifications();
     const handleDataUpdated = () => refreshAppData();
     const handleSettingsUpdated = () => setLangVersion((v) => v + 1);
+    const handleNavigate = (e: any) => {
+      if (e.detail?.tab) {
+        setActiveTab(e.detail.tab);
+      }
+    };
 
     window.addEventListener('downpeso:data-updated', handleDataUpdated);
     window.addEventListener('downpeso:settings-updated', handleSettingsUpdated);
+    window.addEventListener('downpeso:navigate', handleNavigate);
     return () => {
       window.removeEventListener('downpeso:data-updated', handleDataUpdated);
       window.removeEventListener('downpeso:settings-updated', handleSettingsUpdated);
+      window.removeEventListener('downpeso:navigate', handleNavigate);
     };
   }, [refreshAppData]);
 

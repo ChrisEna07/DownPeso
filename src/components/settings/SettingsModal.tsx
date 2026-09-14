@@ -19,7 +19,7 @@ import {
 } from '@/lib/settings';
 import { AppSettings, ThemeMode, FontSize } from '@/types';
 import { LANGUAGES, t } from '@/lib/i18n';
-import { triggerSmartHydrationReminder, requestNotificationPermission } from '@/lib/notifications';
+import { triggerSmartHydrationReminder, requestNotificationPermission, testPushNotificationWithDelay } from '@/lib/notifications';
 import { showFeedback } from '@/lib/feedback';
 
 interface SettingsModalProps {
@@ -82,6 +82,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       title: 'Prueba de Aviso de Otto',
       message: 'Se ha enviado un recordatorio de hidratación interactivo con botones rápidos.'
     });
+  };
+
+  const handleTestDelayedPush = async () => {
+    try {
+      showFeedback({
+        type: 'announcement',
+        title: 'Notificación Push en 3s',
+        message: '¡Minimiza la app o bloquea tu pantalla ahora para verla en la bandeja del sistema!'
+      });
+      await testPushNotificationWithDelay(3);
+      setPermStatus(Notification.permission);
+    } catch (err: any) {
+      showFeedback({
+        type: 'error',
+        title: 'Permiso Denegado',
+        message: err.message || 'Por favor otorga permisos de notificación en tu navegador.'
+      });
+    }
   };
 
   return (
@@ -213,29 +231,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-                    {permStatus !== 'granted' ? (
-                      <button
-                        onClick={handleRequestPerm}
-                        className="text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1.5"
-                      >
-                        <Bell className="w-4 h-4" />
-                        {t('notif_native_perm', settings.language)}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4" />
-                        {t('notif_native_enabled', settings.language)}
-                      </span>
-                    )}
+                  <div className="flex flex-col gap-2.5 pt-2">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                      {permStatus !== 'granted' ? (
+                        <button
+                          type="button"
+                          onClick={handleRequestPerm}
+                          className="text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1.5"
+                        >
+                          <Bell className="w-4 h-4" />
+                          {t('notif_native_perm', settings.language)}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4" />
+                          {t('notif_native_enabled', settings.language)}
+                        </span>
+                      )}
 
-                    <button
-                      onClick={handleTestNotice}
-                      className="w-full sm:w-auto px-4 py-2 rounded-2xl bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-200 text-xs font-bold hover:bg-cyan-200 dark:hover:bg-cyan-900 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      <Droplets className="w-4 h-4 text-cyan-600" />
-                      {t('notif_test_btn', settings.language)}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={handleTestNotice}
+                        className="w-full sm:w-auto px-4 py-2 rounded-2xl bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-200 text-xs font-bold hover:bg-cyan-200 dark:hover:bg-cyan-900 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Droplets className="w-4 h-4 text-cyan-600" />
+                        {t('notif_test_btn', settings.language)}
+                      </button>
+                    </div>
+
+                    {/* Botón de prueba Push Nativa Real */}
+                    <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200/50 dark:border-emerald-800/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 block">
+                          🔔 Notificación Push del Sistema (Real)
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Pruébala con 3 segundos de retardo para minimizar la app y verla en la bandeja de tu móvil o PC.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTestDelayedPush}
+                        className="w-full sm:w-auto px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-sm shrink-0 whitespace-nowrap"
+                      >
+                        Probar en 3 seg
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

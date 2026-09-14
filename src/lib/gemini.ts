@@ -3,7 +3,7 @@ import { db, getTodayDateString, getOrCreateTodayStreak } from './db';
 import { deobfuscateKey } from './crypto';
 import { UserProfile, Recipe, CoachAction, FoodLog } from '@/types';
 import { calculateBMI } from './calculations';
-import { getAppSettings } from './settings';
+import { getAppSettings, saveAppSettings, applyTheme, applyFontSize } from './settings';
 import { getLanguagePromptInstruction } from './i18n';
 import { showFeedback } from './feedback';
 
@@ -169,23 +169,36 @@ ${streakSummary}
 Comidas registradas hoy:
 ${foodSummary}
 
-DIRECTRICES DE TUS RESPUESTAS (COACH OTTO):
+DIRECTRICES DE TUS RESPUESTAS Y PROACTIVIDAD (COACH OTTO):
 1. Preséntate y actúa siempre como Otto. Sé positivo, empático, realista y científico sin ser aburrido.
-2. UTILIZA LO QUE HAS APRENDIDO DE ÉL: Si en sus notas o hábitos ves que ha tenido antojos por la tarde, cansancio, o por el contrario un gran día de energía y constancia, menciónalo sutilmente para que sepa que Otto realmente lo conoce y recuerda su progreso.
+2. NUNCA SEAS UN BOT PASIVO:
+   - No te limites a responder lo que te preguntan y quedarte en silencio.
+   - Analiza el momento del día y el estado de sus hábitos.
+   - En CADA intervención, hazle al final una pregunta cercana de seguimiento, una sugerencia de acción inmediata o una propuesta para su siguiente comida/hábito (ejemplo: "¿Cómo va tu nivel de energía esta tarde?", "¿Ya tomaste tu vaso de agua de media mañana?", "¿Te gustaría que planifiquemos una cena ligera para hoy?").
 3. Promueve comida casera, accesible y económica (huevo, avena, verduras de mercado, legumbres, atún).
-4. SUPERPODER DE REGISTRO AUTOMÁTICO (ASISTENTE INTEGRAL):
-Tienes el poder de registrar y modificar directamente los hábitos y datos del usuario en la base de datos de la app.
-Cuando el usuario te cuente que tomó agua, comió algo, hizo ejercicio, consumió vegetales o se pesó, respóndele de forma natural y cálida confirmándole que ya lo anotaste por él en su diario de hoy, e INCLUYE al final de tu respuesta la acción técnica en esta sintaxis EXACTA:
+4. SUPERPODER DE CONTROL TOTAL DE LA APLICACIÓN (ASISTENTE INTEGRAL):
+Tienes el poder no solo de aconsejar, sino de modificar directamente la aplicación, registrar hábitos y cambiar ajustes en tiempo real.
+Cuando el usuario te cuente un hábito o te pida una acción (desde anotar comida/agua hasta poner modo oscuro o cambiar el tamaño de letra), confírmalo con calidez en tu texto e INCLUYE al final la acción técnica en esta sintaxis EXACTA:
 - Si tomó agua (ej. "tomé 3 vasos de agua", "me tomé un vaso"):
   <<<ACTION:{"type":"add_water","glasses":3}>>>
-- Si comió algo (ej. "comí sopa de verduras con huevo", "cené carne molida"):
-  <<<ACTION:{"type":"add_food","mealType":"cena","description":"Carne molida con 2 huevos","estimatedCalories":360,"healthyRating":"excelente"}>>>
+- Si comió algo (ej. "comí sopa de verduras con huevo", "cené ensalada con atún"):
+  <<<ACTION:{"type":"add_food","mealType":"cena","description":"Ensalada fresca con atún y limón","estimatedCalories":320,"healthyRating":"excelente"}>>>
 - Si hizo ejercicio o caminó (ej. "hice 20 min de caminata", "hice la rutina"):
   <<<ACTION:{"type":"log_exercise","minutes":20}>>>
 - Si consumió vegetales (ej. "comí ensalada", "comí brócoli"):
   <<<ACTION:{"type":"add_veggies","portions":1}>>>
 - Si registró un nuevo peso (ej. "hoy pesé 81.5 kg"):
   <<<ACTION:{"type":"record_weight","weight":81.5}>>>
+- Si te pide guardar una nota, pensamiento o reflexión en su diario de hábitos:
+  <<<ACTION:{"type":"add_note","note":"Me sentí con mucha energía tras caminar 20 min"}>>>
+- Si te pide poner tema oscuro, claro o automático (ej. "Otto pon modo oscuro", "activa tema claro"):
+  <<<ACTION:{"type":"set_theme","mode":"dark"}>>>  (modos válidos: "dark", "light", "system")
+- Si te pide cambiar o agrandar la letra (ej. "Otto haz la letra más grande", "reduce la letra"):
+  <<<ACTION:{"type":"set_font_size","size":"lg"}>>> (tamaños válidos: "sm", "base", "lg")
+- Si te pide cambiar de idioma (ej. "Otto cambia el idioma a inglés"):
+  <<<ACTION:{"type":"set_language","language":"en"}>>> (idiomas válidos: "es", "en", "fr", "ru")
+- Si te pide ir o abrir otra sección (ej. "Otto llévame a las recetas", "abre los ejercicios", "vamos al inicio"):
+  <<<ACTION:{"type":"navigate_tab","tab":"recipes"}>>> (tabs válidos: "dashboard", "recipes", "exercises", "streaks", "remedies", "backup")
 
 REGLA DE ORO DE INTERFAZ:
 NUNCA escribas JSON, ni corchetes crudos, ni [LOG_SUGGESTION] en tu texto conversacional visible. Toda acción debe ir dentro de <<<ACTION:{...}>>>. El sistema la procesará y la ocultará automáticamente del chat.
@@ -295,6 +308,113 @@ export async function executeAndCleanCoachActions(
               type: 'record_weight',
               label: `Nuevo peso anotado: ${newWeight} kg (IMC: ${newBmi})`,
               data: { weight: newWeight, bmi: newBmi }
+            });
+          }
+        } else if (type === 'set_theme' || payload.theme || payload.mode) {
+          const rawMode = String(payload.mode || payload.theme || '').toLowerCase();
+          const mode = (rawMode.includes('osc') || rawMode.includes('dark')) ? 'dark'
+            : (rawMode.includes('cla') || rawMode.includes('light')) ? 'light'
+            : 'system';
+          applyTheme(mode);
+          saveAppSettings({ theme: mode });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('downpeso:settings-updated'));
+          }
+          executedActions.push({
+            type: 'set_theme',
+            label: `Tema cambiado a: ${mode === 'dark' ? 'Oscuro' : mode === 'light' ? 'Claro' : 'Automático'}`,
+            data: { theme: mode }
+          });
+          showFeedback({
+            type: 'announcement',
+            title: 'Tema Visual Modificado',
+            message: `Otto cambió la interfaz a modo ${mode === 'dark' ? 'Oscuro 🌙' : mode === 'light' ? 'Claro ☀️' : 'Sistema 🖥️'}.`
+          });
+        } else if (type === 'set_font_size' || payload.fontSize || payload.size) {
+          const rawSize = String(payload.size || payload.fontSize || '').toLowerCase();
+          const size = (rawSize.includes('peq') || rawSize === 'sm' || rawSize === 'small') ? 'sm'
+            : (rawSize.includes('gra') || rawSize === 'lg' || rawSize === 'large') ? 'lg'
+            : 'base';
+          applyFontSize(size);
+          saveAppSettings({ fontSize: size });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('downpeso:settings-updated'));
+          }
+          executedActions.push({
+            type: 'set_font_size',
+            label: `Tamaño de letra: ${size === 'sm' ? 'Pequeña' : size === 'lg' ? 'Grande' : 'Normal'}`,
+            data: { fontSize: size }
+          });
+          showFeedback({
+            type: 'announcement',
+            title: 'Tamaño de Letra',
+            message: `Otto ajustó la fuente a tamaño ${size === 'sm' ? 'Pequeño' : size === 'lg' ? 'Grande' : 'Normal'}.`
+          });
+        } else if (type === 'set_language' || payload.language || payload.lang) {
+          const rawLang = String(payload.language || payload.lang || '').toLowerCase();
+          const lang = (rawLang.includes('en') || rawLang.includes('ing')) ? 'en'
+            : (rawLang.includes('fr')) ? 'fr'
+            : (rawLang.includes('ru')) ? 'ru'
+            : 'es';
+          saveAppSettings({ language: lang });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('downpeso:settings-updated'));
+          }
+          executedActions.push({
+            type: 'set_language',
+            label: `Idioma: ${lang.toUpperCase()}`,
+            data: { language: lang }
+          });
+          showFeedback({
+            type: 'announcement',
+            title: 'Idioma Actualizado',
+            message: `Otto configuró la aplicación en ${lang.toUpperCase()}.`
+          });
+        } else if (type === 'navigate_tab' || payload.tab) {
+          const rawTab = String(payload.tab || '').toLowerCase();
+          const tabMap: Record<string, string> = {
+            inicio: 'dashboard',
+            dashboard: 'dashboard',
+            recetas: 'recipes',
+            recetario: 'recipes',
+            recipes: 'recipes',
+            ejercicios: 'exercises',
+            rutinas: 'exercises',
+            exercises: 'exercises',
+            rachas: 'streaks',
+            habitos: 'streaks',
+            streaks: 'streaks',
+            remedios: 'remedies',
+            infusiones: 'remedies',
+            remedies: 'remedies',
+            copia: 'backup',
+            backup: 'backup',
+            chat: 'chat'
+          };
+          const targetTab = tabMap[rawTab] || 'dashboard';
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('downpeso:navigate', { detail: { tab: targetTab } }));
+          }
+          executedActions.push({
+            type: 'navigate_tab',
+            label: `Navegando a: ${targetTab}`,
+            data: { tab: targetTab }
+          });
+        } else if (type === 'add_note' || payload.note) {
+          const noteText = String(payload.note || '').trim();
+          if (noteText) {
+            const streak = await getOrCreateTodayStreak();
+            const existingNotes = streak.notes ? `${streak.notes}\n• ${noteText}` : `• ${noteText}`;
+            await db.dailyStreaks.update(streak.id!, { notes: existingNotes });
+            executedActions.push({
+              type: 'add_note',
+              label: `Nota guardada en tu diario de hoy`,
+              data: { note: noteText }
+            });
+            showFeedback({
+              type: 'success',
+              title: 'Diario de Hábitos',
+              message: 'Otto guardó tu nota y reflexión en el registro diario.'
             });
           }
         }

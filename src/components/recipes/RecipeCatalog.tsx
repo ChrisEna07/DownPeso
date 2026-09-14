@@ -12,10 +12,15 @@ import {
   Refrigerator,
   ChefHat,
   Loader2,
-  X
+  X,
+  Sunrise,
+  Sun,
+  Moon,
+  BookOpen
 } from 'lucide-react';
 import { db } from '@/lib/db';
 import { generateSmartFridgeRecipe } from '@/lib/gemini';
+import { showFeedback } from '@/lib/feedback';
 import confetti from 'canvas-confetti';
 
 const COMMON_PANTRY_ITEMS = [
@@ -25,18 +30,76 @@ const COMMON_PANTRY_ITEMS = [
   'Limón', 'Pepino', 'Chayote'
 ];
 
+interface MealTimeRecommendation {
+  category: RecipeCategory;
+  label: string;
+  period: string;
+  badge: string;
+  icon: React.ReactNode;
+  description: string;
+  basics: string[];
+}
+
+function getTimeOfDayMeal(): MealTimeRecommendation {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) {
+    return {
+      category: 'desayuno',
+      label: 'Desayuno Energético',
+      period: 'Mañana (5:00 - 12:00)',
+      badge: 'Desayuno Recomendado',
+      icon: <Sunrise className="w-5 h-5 text-amber-500" />,
+      description: 'Opciones ricas en proteína y fibra que estabilizan la glucosa y despiertan tu metabolismo con saciedad prolongada.',
+      basics: ['Huevos', 'Avena integral', 'Espinacas', 'Manzana / Fruta', 'Café / Té sin azúcar']
+    };
+  } else if (hour >= 12 && hour < 18) {
+    return {
+      category: 'almuerzo',
+      label: 'Almuerzo Saciante & Económico',
+      period: 'Mediodía (12:00 - 18:00)',
+      badge: 'Almuerzo Recomendado',
+      icon: <Sun className="w-5 h-5 text-orange-500" />,
+      description: 'Platos completos con vegetales, legumbres y proteína magra para mantenerte saciado sin pesadez vespertina.',
+      basics: ['Pechuga de pollo', 'Lentejas / Frijoles', 'Verduras salteadas', 'Ensalada fresca', 'Atún']
+    };
+  } else {
+    return {
+      category: 'cena',
+      label: 'Cena Ligera & Digestiva',
+      period: 'Tarde / Noche (18:00 - 5:00)',
+      badge: 'Cena Ligera Recomendada',
+      icon: <Moon className="w-5 h-5 text-indigo-400" />,
+      description: 'Cenas bajas en carbohidratos simples para favorecer un descanso reparador y quema lipídica nocturna.',
+      basics: ['Atún en agua', 'Nopales con queso panela', 'Calabacitas salteadas', 'Consomé de verduras']
+    };
+  }
+}
+
 export const RecipeCatalog: React.FC = () => {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [activeCategory, setActiveCategory] = useState<RecipeCategory | 'todas'>('todas');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
 
-  // Estado para el modal "¿Qué hay en mi refri?"
+  // Modal "¿Qué hay en mi refri?"
   const [showFridgeModal, setShowFridgeModal] = useState(false);
   const [fridgeIngredients, setFridgeIngredients] = useState<string[]>([]);
   const [customIngredientInput, setCustomIngredientInput] = useState('');
+  const [targetCategory, setTargetCategory] = useState<RecipeCategory>('almuerzo');
   const [isGeneratingRecipe, setIsGeneratingRecipe] = useState(false);
   const [fridgeError, setFridgeError] = useState<string | null>(null);
+
+  // Modal "Agregar Receta Casera Manual"
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [manualTitle, setManualTitle] = useState('');
+  const [manualCategory, setManualCategory] = useState<RecipeCategory>('almuerzo');
+  const [manualDescription, setManualDescription] = useState('');
+  const [manualCalories, setManualCalories] = useState('320');
+  const [manualTime, setManualTime] = useState('20');
+  const [manualIngredients, setManualIngredients] = useState('');
+  const [manualInstructions, setManualInstructions] = useState('');
+
+  const timeOfDayMeal = getTimeOfDayMeal();
 
   const loadRecipes = async () => {
     const list = await db.recipes.toArray();
@@ -56,6 +119,9 @@ export const RecipeCatalog: React.FC = () => {
     return matchesCategory && matchesSearch;
   });
 
+  // Sugerencia destacada según el horario actual
+  const timeSuggestedRecipe = recipes.find(r => r.category === timeOfDayMeal.category) || recipes[0];
+
   const handleToggleFridgeIngredient = (item: string) => {
     if (fridgeIngredients.includes(item)) {
       setFridgeIngredients(fridgeIngredients.filter(i => i !== item));
@@ -73,6 +139,22 @@ export const RecipeCatalog: React.FC = () => {
     }
   };
 
+  const handleOpenFridgeModal = (forcedCategory?: RecipeCategory) => {
+    const cat = forcedCategory || (activeCategory !== 'todas' ? (activeCategory as RecipeCategory) : timeOfDayMeal.category);
+    setTargetCategory(cat);
+    setShowFridgeModal(true);
+  };
+
+  const handleOpenAddModal = () => {
+    const cat = activeCategory !== 'todas' ? (activeCategory as RecipeCategory) : timeOfDayMeal.category;
+    setManualCategory(cat);
+    setManualTitle('');
+    setManualDescription('');
+    setManualIngredients('');
+    setManualInstructions('');
+    setShowAddModal(true);
+  };
+
   const handleGenerateFromFridge = async () => {
     if (fridgeIngredients.length === 0) return;
     setIsGeneratingRecipe(true);
@@ -80,9 +162,15 @@ export const RecipeCatalog: React.FC = () => {
 
     try {
       const generated = await generateSmartFridgeRecipe(fridgeIngredients);
-      // Guardar directamente en Dexie
-      const id = await db.recipes.add(generated);
-      const savedRecipe = { ...generated, id };
+      // Asignar explícitamente la categoría deseada y marcar como creada por el usuario
+      const customRecipe: Recipe = {
+        ...generated,
+        category: targetCategory,
+        isCustom: true
+      };
+
+      const id = await db.recipes.add(customRecipe);
+      const savedRecipe = { ...customRecipe, id };
 
       try {
         confetti({ particleCount: 70, spread: 60, origin: { y: 0.7 } });
@@ -92,6 +180,18 @@ export const RecipeCatalog: React.FC = () => {
       setSelectedRecipe(savedRecipe);
       setShowFridgeModal(false);
       setFridgeIngredients([]);
+
+      // Feedback explícito sobre la categoría
+      showFeedback({
+        type: 'success',
+        title: '¡Receta Creada con tu Refri!',
+        message: `"${savedRecipe.title}" fue asignada y guardada en la categoría de ${targetCategory.toUpperCase()}.`
+      });
+
+      // Si el usuario no estaba en esa categoría, cambiar para que la vea de inmediato
+      if (activeCategory !== 'todas' && activeCategory !== targetCategory) {
+        setActiveCategory(targetCategory);
+      }
     } catch (err: any) {
       console.error('Error generando receta:', err);
       setFridgeError(err.message || 'No se pudo generar la receta con esos ingredientes.');
@@ -100,10 +200,57 @@ export const RecipeCatalog: React.FC = () => {
     }
   };
 
+  const handleSaveManualRecipe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualTitle.trim()) return;
+
+    const ingredientsList = manualIngredients
+      .split('\n')
+      .map(i => i.trim())
+      .filter(i => i.length > 0);
+
+    const instructionsList = manualInstructions
+      .split('\n')
+      .map(i => i.trim())
+      .filter(i => i.length > 0);
+
+    const newRecipe: Recipe = {
+      title: manualTitle.trim(),
+      category: manualCategory,
+      description: manualDescription.trim() || 'Receta casera añadida personalmente.',
+      prepTimeMinutes: parseInt(manualTime) || 20,
+      estimatedCalories: parseInt(manualCalories) || 320,
+      budgetFriendly: true,
+      isCustom: true,
+      ingredients: ingredientsList.length > 0 ? ingredientsList : ['Ingredientes caseros al gusto'],
+      instructions: instructionsList.length > 0 ? instructionsList : ['Preparar y cocinar al gusto con sal moderada.'],
+      tags: ['Casera', manualCategory, 'Saludable']
+    };
+
+    const id = await db.recipes.add(newRecipe);
+    await loadRecipes();
+    setShowAddModal(false);
+
+    showFeedback({
+      type: 'success',
+      title: '¡Receta Guardada!',
+      message: `"${newRecipe.title}" se agregó a la sección de ${manualCategory.toUpperCase()}.`
+    });
+
+    if (activeCategory !== 'todas' && activeCategory !== manualCategory) {
+      setActiveCategory(manualCategory);
+    }
+    setSelectedRecipe({ ...newRecipe, id });
+
+    try {
+      confetti({ particleCount: 60, spread: 60 });
+    } catch (_) {}
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200 pb-20 md:pb-8">
-      {/* Cabecera & Botón del Refri */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+      {/* Cabecera & Botones de Acción */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
             <UtensilsCrossed className="w-5 h-5" />
@@ -117,13 +264,96 @@ export const RecipeCatalog: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setShowFridgeModal(true)}
-          className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-600/20 transition-all hover:scale-105 active:scale-95 shrink-0"
-        >
-          <Refrigerator className="w-4 h-4" />
-          ¿Qué hay en mi refri?
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleOpenAddModal}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-bold text-xs sm:text-sm border border-slate-200 dark:border-slate-700 transition-all hover:scale-105 active:scale-95"
+          >
+            <Plus className="w-4 h-4 text-emerald-600" />
+            Nueva Receta
+          </button>
+
+          <button
+            onClick={() => handleOpenFridgeModal()}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-600/20 transition-all hover:scale-105 active:scale-95"
+          >
+            <Refrigerator className="w-4 h-4" />
+            ¿Qué hay en mi refri?
+          </button>
+        </div>
+      </div>
+
+      {/* Widget de Sugerencia Inteligente según Horario del Día */}
+      <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-emerald-50 via-teal-50/50 to-white dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-slate-900 border border-emerald-200/80 dark:border-emerald-800/50 shadow-sm relative overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          <div className="space-y-2 max-w-2xl">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/10 dark:bg-emerald-400/15 text-emerald-800 dark:text-emerald-300 text-xs font-black uppercase tracking-wider border border-emerald-300/40 dark:border-emerald-700/40">
+                {timeOfDayMeal.icon}
+                {timeOfDayMeal.badge} • {timeOfDayMeal.period}
+              </span>
+            </div>
+
+            <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+              Sugerencia de {timeOfDayMeal.label} para esta hora
+            </h3>
+
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              {timeOfDayMeal.description}
+            </p>
+
+            {/* Ingredientes básicos clave para esta hora */}
+            <div className="pt-1 flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1">
+                Básicos recomendados:
+              </span>
+              {timeOfDayMeal.basics.map((b, i) => (
+                <span
+                  key={i}
+                  className="text-[11px] font-semibold bg-white dark:bg-slate-800 text-emerald-800 dark:text-emerald-300 px-2.5 py-0.5 rounded-lg border border-emerald-200/60 dark:border-emerald-800/50 shadow-xs"
+                >
+                  {b}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Tarjeta de Receta Recomendada para el horario */}
+          {timeSuggestedRecipe && (
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl p-4 border border-emerald-200 dark:border-emerald-800 shadow-sm sm:w-80 shrink-0 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-300 mb-1">
+                  <span>Recomendada de hoy</span>
+                  <span className="flex items-center gap-1 font-extrabold text-amber-600 dark:text-amber-400">
+                    <Flame className="w-3 h-3" /> ~{timeSuggestedRecipe.estimatedCalories} kcal
+                  </span>
+                </div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white line-clamp-1">
+                  {timeSuggestedRecipe.title}
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1">
+                  {timeSuggestedRecipe.description}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => setSelectedRecipe(timeSuggestedRecipe)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs text-center transition-colors flex items-center justify-center gap-1"
+                >
+                  <BookOpen className="w-3.5 h-3.5" /> Ver Receta
+                </button>
+                <button
+                  onClick={() => handleOpenFridgeModal(timeOfDayMeal.category)}
+                  className="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors"
+                  title="Crear variante con IA para esta comida"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Barra de Búsqueda y Filtros de Categoría */}
@@ -225,7 +455,7 @@ export const RecipeCatalog: React.FC = () => {
 
       {/* Modal Detalle de Receta */}
       {selectedRecipe && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col">
             <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex items-center justify-between">
               <div>
@@ -308,9 +538,9 @@ export const RecipeCatalog: React.FC = () => {
         </div>
       )}
 
-      {/* Modal "¿Qué hay en mi refri?" con IA */}
+      {/* Modal "¿Qué hay en mi refri?" con IA y Selección Explícita de Categoría */}
       {showFridgeModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -332,6 +562,34 @@ export const RecipeCatalog: React.FC = () => {
               >
                 ✕
               </button>
+            </div>
+
+            {/* Selector de Categoría Destino */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 block">
+                ¿Para qué momento deseas preparar esta receta?
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs font-bold">
+                {[
+                  { id: 'desayuno', label: '🍳 Desayuno' },
+                  { id: 'almuerzo', label: '🍲 Almuerzo' },
+                  { id: 'cena', label: '🌙 Cena Ligera' },
+                  { id: 'snack', label: '🍏 Snack' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setTargetCategory(item.id as RecipeCategory)}
+                    className={`py-2 px-2.5 rounded-xl transition-all text-center text-xs ${
+                      targetCategory === item.id
+                        ? 'bg-emerald-600 text-white shadow-sm scale-102'
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-emerald-400'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Selector de ingredientes comunes */}
@@ -425,16 +683,178 @@ export const RecipeCatalog: React.FC = () => {
                 {isGeneratingRecipe ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    El Chef IA está creando tu receta...
+                    Creando receta de {targetCategory}...
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    Crear Receta con esto
+                    Crear en {targetCategory.toUpperCase()}
                   </>
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para "Añadir Receta Casera Manual" */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-600 rounded-2xl">
+                  <ChefHat className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Añadir Receta Casera
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Guarda tus platillos caseros favoritos organizados por categoría
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualRecipe} className="space-y-4">
+              {/* Título de la receta */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Nombre del platillo
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Omelette de espinacas con panela"
+                  value={manualTitle}
+                  onChange={(e) => setManualTitle(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Categoría */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  ¿En qué categoría deseas agregar esta receta?
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs font-bold">
+                  {[
+                    { id: 'desayuno', label: '🍳 Desayuno' },
+                    { id: 'almuerzo', label: '🍲 Almuerzo' },
+                    { id: 'cena', label: '🌙 Cena Ligera' },
+                    { id: 'snack', label: '🍏 Snack' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setManualCategory(cat.id as RecipeCategory)}
+                      className={`py-2 px-2 rounded-xl transition-all text-center text-xs ${
+                        manualCategory === cat.id
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tiempo y Calorías aproximadas */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Tiempo de prep. (min)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="180"
+                    value={manualTime}
+                    onChange={(e) => setManualTime(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Calorías aprox. (kcal)
+                  </label>
+                  <input
+                    type="number"
+                    min="50"
+                    max="2000"
+                    value={manualCalories}
+                    onChange={(e) => setManualCalories(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Descripción breve */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Descripción breve
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. Desayuno alto en proteína y fibra que se prepara en 10 minutos."
+                  value={manualDescription}
+                  onChange={(e) => setManualDescription(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Ingredientes (uno por línea) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Ingredientes (uno por línea)
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder={"2 huevos enteros\n1 taza de espinacas frescas\n50g de queso panela"}
+                  value={manualIngredients}
+                  onChange={(e) => setManualIngredients(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Instrucciones paso a paso */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Instrucciones de preparación (un paso por línea)
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder={"Batir los huevos en un plato hondo.\nSaltear las espinacas en sartén con unas gotas de aceite.\nVerter los huevos y añadir el queso panela al doblar."}
+                  value={manualInstructions}
+                  onChange={(e) => setManualInstructions(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20"
+                >
+                  Guardar en {manualCategory.toUpperCase()}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -26,10 +26,13 @@ interface ChatInterfaceProps {
 
 const QUICK_PROMPTS = [
   '🍽️ Registrar lo que comí hoy',
-  '🎯 ¿Cómo voy con mi meta de peso?',
+  '💧 Anota 2 vasos de agua que tomé',
+  '🎯 ¿Cómo voy con mi meta y qué me sugieres?',
   '🥗 Recomiéndame una cena ligera y rápida',
-  '😫 Tengo antojo de algo dulce por la tarde, ¿qué me sugieres?',
-  '🏃 ¿Qué ejercicio ligero puedo hacer hoy en casa?'
+  '🌙 Otto, activa el modo oscuro',
+  '🔤 Otto, haz la letra más grande',
+  '🏃 ¿Qué ejercicio ligero puedo hacer hoy en casa?',
+  '📝 Anota en mi diario que hoy me sentí con mucha energía'
 ];
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLogged }) => {
@@ -368,13 +371,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onFoodLog
       {/* Input de Mensaje y Sugerencias Rápidas */}
       <div className="p-3 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2">
         {messages.length > 0 && (
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
             <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">{t('quick_shortcuts')}</span>
-            {QUICK_PROMPTS.slice(0, 3).map((qp, i) => (
+            {QUICK_PROMPTS.map((qp, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => handleSendMessage(qp)}
-                className="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950 text-[11px] font-semibold text-slate-600 dark:text-slate-300 transition-colors"
+                className="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950 text-[11px] font-semibold text-slate-600 dark:text-slate-300 transition-colors shrink-0"
               >
                 {qp}
               </button>

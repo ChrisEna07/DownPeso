@@ -25,7 +25,12 @@ export type CoachActionType =
   | 'log_exercise'
   | 'add_veggies'
   | 'record_weight'
-  | 'save_recipe';
+  | 'save_recipe'
+  | 'set_theme'
+  | 'set_font_size'
+  | 'set_language'
+  | 'navigate_tab'
+  | 'add_note';
 
 export interface CoachAction {
   type: CoachActionType;
